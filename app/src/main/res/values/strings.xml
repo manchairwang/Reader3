@@ -1245,4 +1245,5 @@
     <string name="pic_gen_channel_pony">本地 Pony 生图</string>
     <string name="pic_gen_channel_qwen">本地 Qwen 生图</string>
     <string name="pic_gen_llm_enable">启用提示词 LLM 竞速</string>
+    <string name="pic_gen_tailscale_detect">自动检测 tailscale 网关（每10分钟）</string>
 </resources>

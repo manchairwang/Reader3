@@ -44,6 +44,7 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
         cbChannelPony.isChecked = PicGenConfig.channelPony
         cbChannelQwen.isChecked = PicGenConfig.channelQwen
         cbLlmEnable.isChecked = PicGenConfig.llmEnable
+        cbTailscaleDetect.isChecked = PicGenConfig.tailscaleAutoDetect
         dsbPicHeightRatio.valueFormat = { "${it.coerceAtLeast(15)}%" }
         dsbPicHeightRatio.progress = (PicGenConfig.heightRatio * 100).toInt()
         dsbPicWidthRatio.valueFormat = { "${it.coerceAtLeast(15)}%" }
@@ -80,6 +81,9 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
         }
         dsbPicWidthRatio.onChanged = {
             PicGenConfig.widthRatio = it.coerceIn(15, 60) / 100f
+        }
+        cbTailscaleDetect.onCheckedChangeListener = { _, isChecked ->
+            PicGenConfig.tailscaleAutoDetect = isChecked
         }
     }
 

@@ -51,6 +51,58 @@ object PicGenManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    init {
+        //tailscale 网关探活循环：启动即探活一轮，之后每 10 分钟检测；可达则自动启用渠道
+        scope.launch {
+            while (true) {
+                if (PicGenConfig.tailscaleAutoDetect) {
+                    probeOmniHosts()
+                }
+                kotlinx.coroutines.delay(10 * 60 * 1000L)
+            }
+        }
+    }
+
+    /** 探活 win/cat 网关：GET /v1/models 8s 超时；可达则自动打开对应渠道开关 */
+    private suspend fun probeOmniHosts() {
+        for (host in PicGenChannels.OMNI_HOSTS) {
+            if (host.name == "win-local") continue
+            val reachable = try {
+                withTimeoutOrNull(8_000L) {
+                    val request = Request.Builder().url("${host.base}/v1/models")
+                        .header("Authorization", "Bearer ${host.token}")
+                        .build()
+                    okHttpClient.newCall(request).execute().use { it.isSuccessful }
+                } ?: false
+            } catch (e: Exception) {
+                false
+            }
+            if (host.name == "cat") {
+                PicGenConfig.omniCatReachable = reachable
+            } else {
+                PicGenConfig.omniWinReachable = reachable
+            }
+            //可达则自动启用对应渠道
+            if (reachable) {
+                if (host.name == "cat" && !PicGenConfig.channelOmniCat) {
+                    PicGenConfig.channelOmniCat = true
+                    LogUtils.d(TAG, "tailscale cat 网关可达，自动启用 omni_cat")
+                }
+                if (host.name != "cat" && !PicGenConfig.channelOmniWin) {
+                    PicGenConfig.channelOmniWin = true
+                    LogUtils.d(TAG, "tailscale win 网关可达，自动启用 omni_win")
+                }
+            }
+        }
+    }
+
+    /** 网关可达性判断：localhost 永远视为可达；tailscale host 用探活缓存值 */
+    private fun hostReachable(host: PicGenChannels.OmniHost): Boolean {
+        if (host.name == "win-local") return true
+        return if (host.name == "cat") PicGenConfig.omniCatReachable
+        else PicGenConfig.omniWinReachable
+    }
+
     //缓存
     private val cacheDir by lazy { File(appCtx.cacheDir, "picgen").apply { mkdirs() } }
     private val memCache = object : LruCache<String, Bitmap>(12) {
@@ -169,10 +221,10 @@ object PicGenManager {
     private suspend fun chatRace(pageText: String): String? {
         val prompt = PromptBuilder.buildSummaryPrompt(pageText)
         val tasks = ArrayList<suspend () -> String?>()
-        //omni 网关
+        //omni 网关（探活判定不可达的直接跳过，避免长超时等待）
         for (host in PicGenChannels.OMNI_HOSTS) {
             val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
-            if (!chOn) continue
+            if (!chOn || !hostReachable(host)) continue
             for (combo in PicGenChannels.PREFERRED_CHAT_COMBOS) {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
@@ -288,7 +340,7 @@ object PicGenManager {
         val combos = ArrayList<Triple<String, String, String>>() //base, token, hostName
         for (host in PicGenChannels.OMNI_HOSTS) {
             val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
-            if (!chOn) continue
+            if (!chOn || !hostReachable(host)) continue
             for (m in PicGenChannels.OMNI_IMAGE_MODELS) {
                 combos.add(Triple(host.base, host.token, host.name))
             }

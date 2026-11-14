@@ -63,4 +63,15 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
     var llmEnable: Boolean
         get() = if (contains(PreferKey.picGenLlmEnable)) getBoolean(PreferKey.picGenLlmEnable) else true
         set(value) = putBoolean(PreferKey.picGenLlmEnable, value)
+
+    //tailscale 自动检测开关：每 10 分钟探活 win/cat 网关，可达则自动启用对应渠道
+    var tailscaleAutoDetect: Boolean
+        get() = if (contains("picGenTailscaleAutoDetect")) getBoolean("picGenTailscaleAutoDetect") else true
+        set(value) = putBoolean("picGenTailscaleAutoDetect", value)
+
+    //运行时缓存：tailscale 网关可达状态（不持久化，每 10 分钟刷新）
+    @Volatile
+    var omniWinReachable: Boolean = false
+    @Volatile
+    var omniCatReachable: Boolean = false
 }

@@ -193,6 +193,25 @@
                 android:layout_margin="6dp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/pic_gen_tailscale_detect" />
+
+            <io.legado.app.ui.widget.checkbox.SmoothCheckBox
+                android:id="@+id/cb_tailscale_detect"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_margin="6dp" />
+        </LinearLayout>
+
     </LinearLayout>
 
 </androidx.core.widget.NestedScrollView>
