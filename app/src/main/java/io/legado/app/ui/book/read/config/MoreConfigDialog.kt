@@ -183,6 +183,10 @@ class MoreConfigDialog : BasePrefDialogFragment() {
                     (activity as? ReadBookActivity)?.showClickRegionalConfig()
                 }
 
+                "picGenConfig" -> {
+                    (activity as? ReadBookActivity)?.showPicGenConfig()
+                }
+
                 PreferKey.pageTouchSlop -> {
                     NumberPickerDialog(requireContext())
                         .setTitle(getString(R.string.page_touch_slop_dialog_title))

@@ -199,4 +199,10 @@
         android:defaultValue="false"
         android:key="readBarStyleFollowPage"
         android:title="@string/read_bar_style_follow_page" />
+
+    <io.legado.app.lib.prefs.Preference
+        android:key="picGenConfig"
+        android:title="@string/pic_gen_config"
+        app:iconSpaceReserved="false"
+        app:isBottomBackground="true" />
 </androidx.preference.PreferenceScreen>

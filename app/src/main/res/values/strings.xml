@@ -1232,4 +1232,17 @@
     <string name="auto_check_new_backup_t">自动检查新备份</string>
     <string name="auto_check_new_backup_s">打开软件时检查是否有新备份，有新备份时提示是否更新</string>
     <string name="sys_image_picker">系统图片选择器</string>
+    <string name="pic_window">图片窗口</string>
+    <string name="pic_window_close">关闭图片窗口</string>
+    <string name="pic_gen_config">图片窗口设置</string>
+    <string name="pic_window_show">显示图片窗口</string>
+    <string name="pic_window_height_ratio">竖屏窗口高度比例</string>
+    <string name="pic_window_width_ratio">横屏窗口宽度比例</string>
+    <string name="pic_gen_channel_agnes_cn">agnes-ai.cn 生图</string>
+    <string name="pic_gen_channel_agnes_com">agnes-ai.com 生图</string>
+    <string name="pic_gen_channel_omni_win">omniroute win 生图</string>
+    <string name="pic_gen_channel_omni_cat">omniroute cat 生图</string>
+    <string name="pic_gen_channel_pony">本地 Pony 生图</string>
+    <string name="pic_gen_channel_qwen">本地 Qwen 生图</string>
+    <string name="pic_gen_llm_enable">启用提示词 LLM 竞速</string>
 </resources>

@@ -13,12 +13,14 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.view.get
 import androidx.core.view.size
+import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
 import com.jaredrummler.android.colorpicker.ColorPickerDialogListener
 import io.legado.app.BuildConfig
@@ -53,6 +55,8 @@ import io.legado.app.help.config.ReadTipConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.source.getSourceType
 import io.legado.app.help.storage.Backup
+import io.legado.app.help.picgen.PicGenConfig
+import io.legado.app.help.picgen.PicGenManager
 import io.legado.app.lib.dialogs.SelectItem
 import io.legado.app.lib.dialogs.alert
 import io.legado.app.lib.dialogs.selector
@@ -76,6 +80,7 @@ import io.legado.app.ui.book.read.config.AutoReadDialog
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.BG_COLOR
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_COLOR
 import io.legado.app.ui.book.read.config.MoreConfigDialog
+import io.legado.app.ui.book.read.config.PicGenConfigDialog
 import io.legado.app.ui.book.read.config.ReadAloudDialog
 import io.legado.app.ui.book.read.config.ReadStyleDialog
 import io.legado.app.ui.book.read.config.TipConfigDialog.Companion.TIP_COLOR
@@ -265,6 +270,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         window.setBackgroundDrawable(null)
         upScreenTimeOut()
         ReadBook.register(this)
+        initPicWindow()
         onBackPressedDispatcher.addCallback(this) {
             if (isShowingSearchResult) {
                 exitSearchMenu()
@@ -321,6 +327,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         super.onConfigurationChanged(newConfig)
         upSystemUiVisibility()
         binding.readView.upStatusBar()
+        upPicWindowLayout()
     }
 
     override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
@@ -994,6 +1001,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             ReadBook.readAloud()
         }
         loadStates = true
+        triggerPicGen()
     }
 
     /**
@@ -1057,6 +1065,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         executor.execute {
             startBackupJob()
         }
+        triggerPicGen()
     }
 
     /**
@@ -1068,6 +1077,112 @@ class ReadBookActivity : BaseReadBookActivity(),
             else /* chapter */ -> ReadBook.durChapterIndex
         }
         binding.readMenu.setSeekPage(progress)
+    }
+
+    /**
+     * 图片窗口：初始化回调 + 布局
+     */
+    private fun initPicWindow() = binding.run {
+        PicGenManager.onImageReady = { key, bitmap, _ ->
+            if (key == currentPicKey) {
+                picWindow.setBitmap(bitmap)
+            }
+        }
+        PicGenManager.onStatus = { key, status ->
+            if (key == currentPicKey) {
+                picWindow.showStatus(status)
+            }
+        }
+        upPicWindowLayout()
+    }
+
+    /**
+     * 图片窗口布局：竖屏在正文下方（bottomMargin），横屏在正文右侧（endMargin）
+     */
+    private fun upPicWindowLayout() = binding.run {
+        if (!PicGenConfig.windowShow) {
+            picWindow.visibility = View.GONE
+            readView.updateLayoutParams<FrameLayout.LayoutParams> {
+                bottomMargin = 0
+                marginEnd = 0
+            }
+            return
+        }
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape) {
+            val w = (resources.displayMetrics.widthPixels * PicGenConfig.widthRatio).toInt()
+            picWindow.visibility = View.VISIBLE
+            (picWindow.layoutParams as? FrameLayout.LayoutParams)?.let {
+                it.width = w
+                it.height = FrameLayout.LayoutParams.MATCH_PARENT
+                it.gravity = Gravity.END or Gravity.TOP
+                picWindow.layoutParams = it
+            }
+            readView.updateLayoutParams<FrameLayout.LayoutParams> {
+                bottomMargin = 0
+                marginEnd = w
+            }
+        } else {
+            val h = (resources.displayMetrics.heightPixels * PicGenConfig.heightRatio).toInt()
+            picWindow.visibility = View.VISIBLE
+            (picWindow.layoutParams as? FrameLayout.LayoutParams)?.let {
+                it.width = FrameLayout.LayoutParams.MATCH_PARENT
+                it.height = h
+                it.gravity = Gravity.BOTTOM or Gravity.START
+                picWindow.layoutParams = it
+            }
+            readView.updateLayoutParams<FrameLayout.LayoutParams> {
+                bottomMargin = h
+                marginEnd = 0
+            }
+        }
+        //窗口尺寸变化后重排
+        triggerPicGen()
+    }
+
+    /**
+     * 配置页关闭后刷新图片窗口布局
+     */
+    fun onPicConfigChanged() {
+        upPicWindowLayout()
+    }
+
+    /**
+     * 当前页图片 cacheKey
+     */
+    private var currentPicKey: String? = null
+
+    /**
+     * 翻页/加载后触发：当前页 + 预读页送入生图管理器
+     */
+    private fun triggerPicGen() = binding.run {
+        if (!PicGenConfig.windowShow) return
+        val pages = ArrayList<String>()
+        try {
+            val factory = readView.pageFactory
+            pages.add(factory.curPage.text)
+            //预读：当前章后 2 页；跨章取下一章首页
+            var p = factory.nextPage.text
+            if (p.isNotBlank()) pages.add(p)
+            p = factory.nextPlusPage.text
+            if (p.isNotBlank()) pages.add(p)
+        } catch (e: Exception) {
+            LogUtils.d("PicGen", "get page text fail: ${e.message}")
+        }
+        if (pages.isEmpty() || pages.first().isBlank()) return
+        val key = md5Key(pages.first())
+        currentPicKey = key
+        //先显示缓存，无则 loading
+        PicGenManager.cachedBitmap(key)?.let {
+            picWindow.setBitmap(it)
+        } ?: picWindow.showLoading()
+        PicGenManager.onVisiblePagesChanged(pages)
+    }
+
+    private fun md5Key(text: String): String {
+        val digest = java.security.MessageDigest.getInstance("MD5")
+            .digest(text.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     /**
@@ -1616,6 +1731,9 @@ class ReadBookActivity : BaseReadBookActivity(),
         tts?.clearTts()
         textActionMenu.dismiss()
         popupAction.dismiss()
+        PicGenManager.onImageReady = null
+        PicGenManager.onStatus = null
+        PicGenManager.onActivityDestroy()
         binding.readView.onDestroy()
         ReadBook.unregister(this)
         if (!ReadBook.inBookshelf && !isChangingConfigurations) {

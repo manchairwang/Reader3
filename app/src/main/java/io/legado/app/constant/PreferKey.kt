@@ -185,4 +185,16 @@ object PreferKey {
     const val showReadTitleAddition = "showReadTitleAddition"
     const val readBarStyleFollowPage = "readBarStyleFollowPage"
     const val contentSelectSpeakMod = "contentReadAloudMod"
+
+    //图片窗口
+    const val picWindowShow = "picWindowShow"
+    const val picWindowHeightRatio = "picWindowHeightRatio"
+    const val picWindowWidthRatio = "picWindowWidthRatio"
+    const val picGenChannelAgnesCn = "picGenChannelAgnesCn"
+    const val picGenChannelAgnesCom = "picGenChannelAgnesCom"
+    const val picGenChannelOmniWin = "picGenChannelOmniWin"
+    const val picGenChannelOmniCat = "picGenChannelOmniCat"
+    const val picGenChannelPony = "picGenChannelPony"
+    const val picGenChannelQwen = "picGenChannelQwen"
+    const val picGenLlmEnable = "picGenLlmEnable"
 }

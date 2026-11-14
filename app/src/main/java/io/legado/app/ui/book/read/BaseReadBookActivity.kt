@@ -34,6 +34,7 @@ import io.legado.app.ui.book.read.config.BgTextConfigDialog
 import io.legado.app.ui.book.read.config.ClickActionConfigDialog
 import io.legado.app.ui.book.read.config.PaddingConfigDialog
 import io.legado.app.ui.book.read.config.PageKeyDialog
+import io.legado.app.ui.book.read.config.PicGenConfigDialog
 import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.utils.ColorUtils
 import io.legado.app.utils.FileDoc
@@ -135,6 +136,10 @@ abstract class BaseReadBookActivity :
 
     fun showClickRegionalConfig() {
         showDialogFragment<ClickActionConfigDialog>()
+    }
+
+    fun showPicGenConfig() {
+        showDialogFragment<PicGenConfigDialog>()
     }
 
     private fun showCustomPageKeyConfig() {
