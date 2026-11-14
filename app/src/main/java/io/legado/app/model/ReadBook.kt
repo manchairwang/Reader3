@@ -309,6 +309,7 @@ object ReadBook : CoroutineScope by MainScope() {
                 durChapterPos = nextPagePos
                 callBack?.cancelSelect()
                 callBack?.upContent()
+                callBack?.pageChanged()
                 saveRead(true)
             }
         }
@@ -323,6 +324,7 @@ object ReadBook : CoroutineScope by MainScope() {
                 hasPrevPage = true
                 durChapterPos = prevPagePos
                 callBack?.upContent()
+                callBack?.pageChanged()
                 saveRead(true)
             }
         }
