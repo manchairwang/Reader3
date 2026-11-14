@@ -42,14 +42,14 @@
             android:id="@+id/dsb_pic_height_ratio"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:max="50"
+            app:max="60"
             app:title="@string/pic_window_height_ratio" />
 
         <io.legado.app.ui.widget.DetailSeekBar
             android:id="@+id/dsb_pic_width_ratio"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:max="50"
+            app:max="60"
             app:title="@string/pic_window_width_ratio" />
 
         <io.legado.app.ui.widget.text.AccentTextView

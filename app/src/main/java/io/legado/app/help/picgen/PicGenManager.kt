@@ -32,10 +32,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * ÉúÍ¼¹ÜÀíÆ÷£¨ÒÆÖ²×Ô LayaAirReaderWithPic Gen.ts£©£º
- * - ÎÄ×Ö ¡ú ¹Ø¼ü×Ö ¡ú TAGS LLM£¨¾ºËÙ£©¡ú ÕýÔò¶µµ× ¡ú ÉúÍ¼£¨agnes/omni Ë«×å¾ºËÙ + pony/qwen ±¾µØ£©
- * - ·­Ò³ÈÎÎñ¼¯ diff£º»»Ò³Ê±ÖÐ¶Ï²»ÔÙÐèÒªµÄÈÎÎñ£¬ÃüÖÐµÄ¼ÌÐø
- * - ´ÅÅÌ + ÄÚ´æ»º´æ
+ * ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö²ï¿½ï¿½ LayaAirReaderWithPic Gen.tsï¿½ï¿½ï¿½ï¿½
+ * - ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ø¼ï¿½ï¿½ï¿½ ï¿½ï¿½ TAGS LLMï¿½ï¿½ï¿½ï¿½ï¿½Ù£ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ò¶µµï¿½ ï¿½ï¿½ ï¿½ï¿½Í¼ï¿½ï¿½agnes/omni Ë«ï¿½å¾ºï¿½ï¿½ + pony/qwen ï¿½ï¿½ï¿½Ø£ï¿½
+ * - ï¿½ï¿½Ò³ï¿½ï¿½ï¿½ï¿½ diffï¿½ï¿½ï¿½ï¿½Ò³Ê±ï¿½Ð¶Ï²ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÐµÄ¼ï¿½ï¿½ï¿½
+ * - ï¿½ï¿½ï¿½ï¿½ + ï¿½Ú´æ»ºï¿½ï¿½
  */
 object PicGenManager {
 
@@ -43,35 +43,35 @@ object PicGenManager {
     private val gson = Gson()
     private const val IMG_TIMEOUT_MS = 180_000L
     private const val CHAT_TIMEOUT_MS = 90_000L
-    private const val COOLDOWN_SEC = 45L          //Á¬ÐøÊ§°ÜÀäÈ´
-    private const val MAX_FAIL = 2                //Á¬ÐøÊ§°Ü´ÎÊýãÐÖµ
-    private const val PEEK_PAGES = 2              //Ô¤¶ÁÒ³Êý£ºµ±Ç°Ò³ + ºó 2 Ò³
-    private const val MAX_CONCURRENT = 5         //²¢·¢ÈÎÎñÉÏÏÞ
+    private const val COOLDOWN_SEC = 45L          //ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½ï¿½ï¿½È´
+    private const val MAX_FAIL = 2                //ï¿½ï¿½ï¿½ï¿½Ê§ï¿½Ü´ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    private const val PEEK_PAGES = 2              //Ô¤ï¿½ï¿½Ò³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç°Ò³ + ï¿½ï¿½ 2 Ò³
+    private const val MAX_CONCURRENT = 5         //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    //»º´æ
+    //ï¿½ï¿½ï¿½ï¿½
     private val cacheDir by lazy { File(appCtx.cacheDir, "picgen").apply { mkdirs() } }
     private val memCache = object : LruCache<String, Bitmap>(12) {
         override fun sizeOf(key: String, value: Bitmap): Int = 1
     }
 
-    //ÈÎÎñ±í£ºcacheKey -> Job£»»»Ò³ diff ÓÃ
+    //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½cacheKey -> Jobï¿½ï¿½ï¿½ï¿½Ò³ diff ï¿½ï¿½
     private val jobs = ConcurrentHashMap<String, Job>()
     private val jobsMutex = Mutex()
 
-    //ÀäÈ´±í£ºÂ·ÓÉ key -> »Ö¸´Ê±¼ä´Á
+    //ï¿½ï¿½È´ï¿½ï¿½ï¿½Â·ï¿½ï¿½ key -> ï¿½Ö¸ï¿½Ê±ï¿½ï¿½ï¿½
     private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val failCount = ConcurrentHashMap<String, Int>()
     private val routeMutex = Mutex()
 
-    //ÂÖ»»¼ÆÊýÆ÷
+    //ï¿½Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     @Volatile
     private var agnesRR = 0
     @Volatile
     private var omniRR = 0
 
-    /** ½á¹û»Øµ÷£ºcacheKey -> bitmap */
+    /** ï¿½ï¿½ï¿½ï¿½Øµï¿½ï¿½ï¿½cacheKey -> bitmap */
     @Volatile
     var onImageReady: ((cacheKey: String, bitmap: Bitmap, source: String) -> Unit)? = null
 
@@ -79,8 +79,8 @@ object PicGenManager {
     var onStatus: ((cacheKey: String, status: String) -> Unit)? = null
 
     /**
-     * ·­Ò³/¼ÓÔØºóµ÷ÓÃ£ºÖØ¹ÀÈÎÎñ¼¯¡£
-     * @param pages ¿É¼û+Ô¤¶ÁÒ³ÎÄ×ÖÁÐ±í
+     * ï¿½ï¿½Ò³/ï¿½ï¿½ï¿½Øºï¿½ï¿½ï¿½Ã£ï¿½ï¿½Ø¹ï¿½ï¿½ï¿½ï¿½ñ¼¯¡ï¿½
+     * @param pages ï¿½É¼ï¿½+Ô¤ï¿½ï¿½Ò³ï¿½ï¿½ï¿½ï¿½ï¿½Ð±ï¿½
      */
     fun onVisiblePagesChanged(pages: List<String>) {
         if (!PicGenConfig.windowShow) return
@@ -90,7 +90,7 @@ object PicGenManager {
         if (cleaned.isEmpty()) return
         scope.launch {
             val keys = cleaned.map { pageKey(it) }.toSet()
-            //diff£ºÍ£µô²»ÔÙÐèÒªµÄÈÎÎñ
+            //diffï¿½ï¿½Í£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
             jobsMutex.withLock {
                 val toCancel = jobs.filterKeys { it !in keys }
                 toCancel.values.forEach { it.cancel() }
@@ -107,7 +107,7 @@ object PicGenManager {
         jobs.clear()
     }
 
-    /** µ¥Ò³ÉúÍ¼£º»º´æÃüÖÐÖ±½Ó»Øµ÷£¬·ñÔòÆðÈÎÎñ */
+    /** ï¿½ï¿½Ò³ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö±ï¿½Ó»Øµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
     private suspend fun genFor(cacheKey: String, pageText: String) {
         if (jobs.containsKey(cacheKey)) return
         if (jobs.size >= MAX_CONCURRENT) return
@@ -125,14 +125,14 @@ object PicGenManager {
         }
         val job = scope.launch {
             try {
-                status(cacheKey, "Éú³ÉÌáÊ¾´Ê¡­")
+                status(cacheKey, "ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê¾ï¿½Ê¡ï¿½")
                 val prompt = buildPrompt(pageText)
-                status(cacheKey, "Éú³ÉÍ¼Æ¬¡­")
+                status(cacheKey, "ï¿½ï¿½ï¿½ï¿½Í¼Æ¬ï¿½ï¿½")
                 val (bytes, source) = generateImage(prompt)
                 if (isBlackImage(bytes)) {
-                    throw IllegalStateException("ÉúÍ¼·µ»ØÈ«ºÚÍ¼")
+                    throw IllegalStateException("ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½È«ï¿½ï¿½Í¼")
                 }
-                val bmp = decodeBytes(bytes) ?: throw IllegalStateException("Í¼Æ¬½âÂëÊ§°Ü")
+                val bmp = decodeBytes(bytes) ?: throw IllegalStateException("Í¼Æ¬ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½")
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
@@ -140,7 +140,7 @@ object PicGenManager {
                 if (e !is kotlinx.coroutines.CancellationException) {
                     LogUtils.d(TAG, "gen fail: ${e.message}")
                     withContext(Dispatchers.Main) {
-                        onStatus?.invoke(cacheKey, "Ê§°Ü: ${e.message?.take(40)}")
+                        onStatus?.invoke(cacheKey, "Ê§ï¿½ï¿½: ${e.message?.take(40)}")
                     }
                 }
             } finally {
@@ -150,7 +150,7 @@ object PicGenManager {
         jobs[cacheKey] = job
     }
 
-    /** ÌáÊ¾´Ê£ºLLM ¾ºËÙ¿ÉÓÃ×ß TAGS£¬È«¹Ò/¹Ø±Õ×ß±¾µØÕýÔò¶µµ× */
+    /** ï¿½ï¿½Ê¾ï¿½Ê£ï¿½LLM ï¿½ï¿½ï¿½Ù¿ï¿½ï¿½ï¿½ï¿½ï¿½ TAGSï¿½ï¿½È«ï¿½ï¿½/ï¿½Ø±ï¿½ï¿½ß±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ò¶µµï¿½ */
     private suspend fun buildPrompt(pageText: String): String {
         if (!PicGenConfig.llmEnable) {
             return PromptBuilder.buildFallbackPrompt(pageText)
@@ -159,11 +159,11 @@ object PicGenManager {
         return summary ?: PromptBuilder.buildFallbackPrompt(pageText)
     }
 
-    // ---- TAGS LLM ¾ºËÙ£ºomni ÓÅÏÈ combo ¡Á Ë«»ú + agnes ÎÄ±¾Ä£ÐÍ£¬×îÏÈ³É¹¦Ó® ----
+    // ---- TAGS LLM ï¿½ï¿½ï¿½Ù£ï¿½omni ï¿½ï¿½ï¿½ï¿½ combo ï¿½ï¿½ Ë«ï¿½ï¿½ + agnes ï¿½Ä±ï¿½Ä£ï¿½Í£ï¿½ï¿½ï¿½ï¿½È³É¹ï¿½Ó® ----
     private suspend fun chatRace(pageText: String): String? {
         val prompt = PromptBuilder.buildSummaryPrompt(pageText)
         val tasks = ArrayList<suspend () -> String?>()
-        //omni Íø¹Ø
+        //omni ï¿½ï¿½ï¿½ï¿½
         for (host in PicGenChannels.OMNI_HOSTS) {
             val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
             if (!chOn) continue
@@ -171,7 +171,7 @@ object PicGenManager {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
         }
-        //agnes ÎÄ±¾Ä£ÐÍ¶µµ×
+        //agnes ï¿½Ä±ï¿½Ä£ï¿½Í¶ï¿½ï¿½ï¿½
         for (site in PicGenChannels.AGNES_SITES) {
             val chOn = if (site.key == "agnes_cn") PicGenConfig.channelAgnesCn else PicGenConfig.channelAgnesCom
             if (!chOn) continue
@@ -198,8 +198,8 @@ object PicGenManager {
             )
             val data = withTimeoutOrNull(CHAT_TIMEOUT_MS) {
                 postJsonRequest("$base/v1/chat/completions", body, token)
-            } ?: throw IllegalStateException("chat ³¬Ê±")
-            val obj = parseJson(data) ?: throw IllegalStateException("chat ÏìÓ¦½âÎöÊ§°Ü")
+            } ?: throw IllegalStateException("chat ï¿½ï¿½Ê±")
+            val obj = parseJson(data) ?: throw IllegalStateException("chat ï¿½ï¿½Ó¦ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½")
             val text = obj.getAsJsonArray("choices")?.get(0)?.asJsonObject
                 ?.getAsJsonObject("message")?.get("content")?.asString ?: ""
             recordSuccess(rkey)
@@ -211,29 +211,29 @@ object PicGenManager {
         }
     }
 
-    // ---- ÉúÍ¼£ºagnes Óë omni Ë«×å²¢ÐÐ¾ºËÙ£¬×îÏÈ³É¹¦Ó®£»±¾µØ pony/qwen Ì½»îºóÓÃ ----
+    // ---- ï¿½ï¿½Í¼ï¿½ï¿½agnes ï¿½ï¿½ omni Ë«ï¿½å²¢ï¿½Ð¾ï¿½ï¿½Ù£ï¿½ï¿½ï¿½ï¿½È³É¹ï¿½Ó®ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ pony/qwen Ì½ï¿½ï¿½ï¿½ï¿½ï¿½ ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
-        //agnes ×å
+        //agnes ï¿½ï¿½
         if (PicGenConfig.channelAgnesCn || PicGenConfig.channelAgnesCom) {
             families.add { imageAgnes(prompt) }
         }
-        //omni ×å
+        //omni ï¿½ï¿½
         if (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) {
             families.add { imageOmniroute(prompt) }
         }
-        //±¾µØ×å
+        //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         if (PicGenConfig.channelPony) {
             families.add { localTxt2Img(PicGenChannels.PONY_BASE, PromptBuilder.buildPonyPrompt(prompt))?.let { it to "pony@local" } }
         }
         if (PicGenConfig.channelQwen) {
             families.add { localTxt2Img(PicGenChannels.QWEN_BASE, prompt.take(900))?.let { it to "qwen@local" } }
         }
-        if (families.isEmpty()) throw IllegalStateException("Ã»ÓÐÆôÓÃÈÎºÎÉúÍ¼ÇþµÀ")
+        if (families.isEmpty()) throw IllegalStateException("Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îºï¿½ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½")
         val result = raceFirst(families.map { scope.async { it() } }) { it != null }
         @Suppress("UNCHECKED_CAST")
         return result as? Pair<ByteArray, String>
-            ?: throw IllegalStateException("È«²¿ÉúÍ¼ÇþµÀÊ§°Ü")
+            ?: throw IllegalStateException("È«ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ï¿½ï¿½ï¿½Ê§ï¿½ï¿½")
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
@@ -244,7 +244,7 @@ object PicGenManager {
             site.tokens.forEach { tk -> combos.add(Triple(site.base, tk, site.key)) }
         }
         if (combos.isEmpty()) return null
-        //Ò»²¨²¢·¢£ºËùÓÐÎ´ÀäÈ´µÄ token ¸÷·¢Ò»¸öÇëÇó£¬×îÏÈ³öÍ¼Ó®
+        //Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î´ï¿½ï¿½È´ï¿½ï¿½ token ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È³ï¿½Í¼Ó®
         val tasks = combos.mapIndexed { ti, (base, tk, siteKey) ->
             val model = PicGenChannels.AGNES_IMAGE_MODELS[(ti + agnesRR) % PicGenChannels.AGNES_IMAGE_MODELS.size]
             scope.async {
@@ -256,7 +256,7 @@ object PicGenManager {
                             "model" to model,
                             "prompt" to prompt.take(900),
                             "n" to 1,
-                            "size" to "1024x1024",
+                            "size" to "768x768",
                             "response_format" to "b64_json"
                         )
                     )
@@ -289,7 +289,7 @@ object PicGenManager {
         }
         if (combos.isEmpty()) return null
         var lastErr: String? = null
-        //ÂÖ»»Ë³Ðò³¢ÊÔ£¨Óë LayaAir Ò»ÖÂ£ºÊ§°ÜÀäÈ´Ìø¹ý£©
+        //ï¿½Ö»ï¿½Ë³ï¿½ï¿½ï¿½Ô£ï¿½ï¿½ï¿½ LayaAir Ò»ï¿½Â£ï¿½Ê§ï¿½ï¿½ï¿½ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         for (k in combos.indices) {
             val (base, tk, hostName) = combos[(omniRR + k) % combos.size]
             val model = PicGenChannels.OMNI_IMAGE_MODELS[(k + omniRR) % PicGenChannels.OMNI_IMAGE_MODELS.size]
@@ -301,15 +301,15 @@ object PicGenManager {
                         "model" to model,
                         "prompt" to prompt.take(900),
                         "n" to 1,
-                        "size" to "1024x1024",
+                        "size" to "768x768",
                         "response_format" to "b64_json"
                     )
                 )
                 val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
                     postJsonRequest("$base/v1/images/generations", body, tk)
-                } ?: throw IllegalStateException("³¬Ê±")
+                } ?: throw IllegalStateException("ï¿½ï¿½Ê±")
                 val item = parseImageResponse(data)
-                    ?: throw IllegalStateException("ÏìÓ¦ÎÞ b64_json Ò²ÎÞ url")
+                    ?: throw IllegalStateException("ï¿½ï¿½Ó¦ï¿½ï¿½ b64_json Ò²ï¿½ï¿½ url")
                 recordSuccess(rkey)
                 omniRR = (omniRR + k + 1) % combos.size
                 return item.first to "${model}@${hostName}"
@@ -327,12 +327,12 @@ object PicGenManager {
         val rkey = "local:$base"
         if (!routeAvailable(rkey)) return null
         return try {
-            //OpenAI ¼æÈÝ¸ñÊ½ÓÅÏÈ
+            //OpenAI ï¿½ï¿½ï¿½Ý¸ï¿½Ê½ï¿½ï¿½ï¿½ï¿½
             val body = gson.toJson(
                 mapOf(
                     "prompt" to prompt,
                     "n" to 1,
-                    "size" to "1024x1024",
+                    "size" to "768x768",
                     "response_format" to "b64_json"
                 )
             )
@@ -344,7 +344,7 @@ object PicGenManager {
                 recordSuccess(rkey)
                 return item.first
             }
-            //sdapi/v1/txt2img ¶µµ×
+            //sdapi/v1/txt2img ï¿½ï¿½ï¿½ï¿½
             val body2 = gson.toJson(
                 mapOf(
                     "prompt" to prompt,
@@ -386,7 +386,7 @@ object PicGenManager {
             .build()
             .newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-                return response.body?.string() ?: throw IllegalStateException("¿ÕÏìÓ¦")
+                return response.body?.string() ?: throw IllegalStateException("ï¿½ï¿½ï¿½ï¿½Ó¦")
             }
     }
 
@@ -394,11 +394,11 @@ object PicGenManager {
         val request = Request.Builder().url(url).build()
         okHttpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-            return response.body?.bytes() ?: throw IllegalStateException("¿ÕÏìÓ¦")
+            return response.body?.bytes() ?: throw IllegalStateException("ï¿½ï¿½ï¿½ï¿½Ó¦")
         }
     }
 
-    /** ½âÎöÉúÍ¼ÏìÓ¦£ºb64_json »ò url Ë«¸ñÊ½ */
+    /** ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í¼ï¿½ï¿½Ó¦ï¿½ï¿½b64_json ï¿½ï¿½ url Ë«ï¿½ï¿½Ê½ */
     private suspend fun parseImageResponse(data: String): Pair<ByteArray, Unit>? {
         val obj = parseJson(data) ?: return null
         val arr = obj.getAsJsonArray("data") ?: return null
@@ -415,7 +415,7 @@ object PicGenManager {
         return null
     }
 
-    // ---- ¾ºËÙ¹¤¾ß£ºÈÎÒ» async ³É¹¦¼´·µ»Ø£¬ÆäÓà cancel ----
+    // ---- ï¿½ï¿½ï¿½Ù¹ï¿½ï¿½ß£ï¿½ï¿½ï¿½Ò» async ï¿½É¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½ cancel ----
     private suspend fun raceFirst(
         deferred: List<Deferred<Any?>>,
         ok: (Any?) -> Boolean
@@ -450,7 +450,7 @@ object PicGenManager {
         return result
     }
 
-    // ---- ÀäÈ´Â·ÓÉ ----
+    // ---- ï¿½ï¿½È´Â·ï¿½ï¿½ ----
     private suspend fun routeAvailable(rkey: String): Boolean = routeMutex.withLock {
         val until = cooldownUntil[rkey] ?: 0
         until <= System.currentTimeMillis()
@@ -470,7 +470,7 @@ object PicGenManager {
         }
     }
 
-    // ---- ¹¤¾ß ----
+    // ---- ï¿½ï¿½ï¿½ï¿½ ----
     private fun pageKey(text: String): String {
         val digest = MessageDigest.getInstance("MD5")
             .digest(text.toByteArray(Charsets.UTF_8))
@@ -484,7 +484,7 @@ object PicGenManager {
     private fun decodeBytes(bytes: ByteArray): Bitmap? =
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-    /** È«ºÚÍ¼¼ì²â£¨ÒÆÖ²×Ô LayaAir Cache.ts£ºµÍ²ÉÑù¾ùÖµ£© */
+    /** È«ï¿½ï¿½Í¼ï¿½ï¿½â£¨ï¿½ï¿½Ö²ï¿½ï¿½ LayaAir Cache.tsï¿½ï¿½ï¿½Í²ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ */
     private fun isBlackImage(bytes: ByteArray): Boolean {
         val opts = BitmapFactory.Options().apply { inSampleSize = 8 }
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return false
@@ -505,7 +505,7 @@ object PicGenManager {
         }
         bmp.recycle()
         val avg = if (sampled == 0) 255.0 else sum.toDouble() / sampled / 3.0
-        return avg < 8.0   //¾ùÖµ < 8 ÊÓÎªÈ«ºÚ
+        return avg < 8.0   //ï¿½ï¿½Öµ < 8 ï¿½ï¿½ÎªÈ«ï¿½ï¿½
     }
 
     private suspend fun status(key: String, s: String) {
@@ -514,7 +514,7 @@ object PicGenManager {
 
     fun cachedBitmap(cacheKey: String): Bitmap? = memCache.get(cacheKey)
 
-    /** Gson ½âÎö JSON ×Ö·û´®Îª JsonObject */
+    /** Gson ï¿½ï¿½ï¿½ï¿½ JSON ï¿½Ö·ï¿½ï¿½ï¿½Îª JsonObject */
     private fun parseJson(data: String?): JsonObject? {
         if (data.isNullOrBlank()) return null
         return try {

@@ -76,10 +76,10 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
             PicGenConfig.llmEnable = isChecked
         }
         dsbPicHeightRatio.onChanged = {
-            PicGenConfig.heightRatio = it.coerceIn(15, 50) / 100f
+            PicGenConfig.heightRatio = it.coerceIn(15, 60) / 100f
         }
         dsbPicWidthRatio.onChanged = {
-            PicGenConfig.widthRatio = it.coerceIn(15, 50) / 100f
+            PicGenConfig.widthRatio = it.coerceIn(15, 60) / 100f
         }
     }
 
