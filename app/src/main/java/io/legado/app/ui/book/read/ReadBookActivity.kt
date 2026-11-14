@@ -1093,6 +1093,8 @@ class ReadBookActivity : BaseReadBookActivity(),
                 picWindow.showStatus(status)
             }
         }
+        //点右上角关闭按钮：切窗口后立即同步正文 margin，保证彻底收起
+        picWindow.onClose = { upPicWindowLayout() }
         upPicWindowLayout()
     }
 
