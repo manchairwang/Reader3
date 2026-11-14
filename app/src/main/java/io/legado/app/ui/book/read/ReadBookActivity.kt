@@ -1157,20 +1157,22 @@ class ReadBookActivity : BaseReadBookActivity(),
      */
     private fun triggerPicGen() = binding.run {
         if (!PicGenConfig.windowShow) return
-        val pages = ArrayList<String>()
+        val pages = ArrayList<Pair<String, String>>()
         try {
             val factory = readView.pageFactory
-            pages.add(factory.curPage.text)
-            //预读：当前章后 2 页；跨章取下一章首页
-            var p = factory.nextPage.text
-            if (p.isNotBlank()) pages.add(p)
-            p = factory.nextPlusPage.text
-            if (p.isNotBlank()) pages.add(p)
+            //当前页 key 用阅读位置（章号+章内字符偏移），横竖屏分页变化不影响
+            val curKey = "c${ReadBook.durChapterIndex}@p${ReadBook.durChapterPos}"
+            pages.add(curKey to factory.curPage.text)
+            //预读：当前章后 2 页；跨章取下一章首页（用各自页起始位置做 key）
+            val next = factory.nextPage
+            if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
+            val nextPlus = factory.nextPlusPage
+            if (nextPlus.text.isNotBlank()) pages.add(stableKey(nextPlus) to nextPlus.text)
         } catch (e: Exception) {
             LogUtils.d("PicGen", "get page text fail: ${e.message}")
         }
-        if (pages.isEmpty() || pages.first().isBlank()) return
-        val key = md5Key(pages.first())
+        if (pages.isEmpty() || pages.first().second.isBlank()) return
+        val key = pages.first().first
         //同页不重复刷新（翻页回调多次触发时防闪烁）
         if (key != currentPicKey) {
             currentPicKey = key
@@ -1182,10 +1184,13 @@ class ReadBookActivity : BaseReadBookActivity(),
         PicGenManager.onVisiblePagesChanged(pages)
     }
 
-    private fun md5Key(text: String): String {
-        val digest = java.security.MessageDigest.getInstance("MD5")
-            .digest(text.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+    /**
+     * 稳定图片 key：章节号 + 章内字符偏移（阅读位置），横竖屏分页变化不影响
+     */
+    private fun stableKey(page: TextPage): String {
+        val chIdx = page.chapterIndex
+        val pos = if (page.lineSize > 0) page.chapterPosition else ReadBook.durChapterPos
+        return "c$chIdx@p$pos"
     }
 
     /**

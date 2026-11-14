@@ -135,22 +135,25 @@ object PicGenManager {
      * 翻页/加载后调用：重估任务集。
      * @param pages 可见+预读页文字列表
      */
-    fun onVisiblePagesChanged(pages: List<String>) {
+    /**
+     * @param pages (stableKey, 生图文字) 列表。stableKey 由调用方给（阅读位置，横竖屏不变）
+     */
+    fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
         if (!PicGenConfig.windowShow) return
-        val cleaned = pages.filter { it.isNotBlank() }
-            .map { it.take(1600) }
-            .filter { it.length >= 20 }
+        val cleaned = pages.filter { it.second.isNotBlank() }
+            .map { (key, text) -> key to text.take(1600) }
+            .filter { it.second.length >= 20 }
         if (cleaned.isEmpty()) return
         scope.launch {
-            val keys = cleaned.map { pageKey(it) }.toSet()
+            val keys = cleaned.map { it.first }.toSet()
             //diff：停掉不再需要的任务
             jobsMutex.withLock {
                 val toCancel = jobs.filterKeys { it !in keys }
                 toCancel.values.forEach { it.cancel() }
                 toCancel.keys.forEach { jobs.remove(it) }
             }
-            cleaned.forEach { text ->
-                genFor(pageKey(text), text)
+            cleaned.forEach { (key, text) ->
+                genFor(key, text)
             }
         }
     }
