@@ -15,6 +15,7 @@ import io.legado.app.help.picgen.PicGenConfig
 /**
  * 阅读页图片窗口：竖屏在正文下方、横屏在正文右侧。
  * 右上角关闭按钮：点击隐藏窗口（切换 PicGenConfig.windowShow）。
+ * 图片未就绪时保留上一张图叠转圈，避免闪烁。
  */
 class PicWindowView @JvmOverloads constructor(
     context: Context,
@@ -48,14 +49,13 @@ class PicWindowView @JvmOverloads constructor(
         tvStatus.visibility = GONE
     }
 
+    //加载中：保留旧图，仅叠转圈，避免黑底闪烁
     fun showLoading() {
-        ivPic.visibility = GONE
         pbPic.visibility = VISIBLE
         tvStatus.visibility = GONE
     }
 
     fun showError(msg: String) {
-        ivPic.visibility = GONE
         pbPic.visibility = GONE
         tvStatus.visibility = VISIBLE
         tvStatus.text = msg
@@ -75,4 +75,6 @@ class PicWindowView @JvmOverloads constructor(
         pbPic.visibility = GONE
         tvStatus.visibility = GONE
     }
+
+    fun hasImage(): Boolean = ivPic.visibility == VISIBLE
 }

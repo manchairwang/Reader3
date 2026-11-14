@@ -1171,11 +1171,14 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
         if (pages.isEmpty() || pages.first().isBlank()) return
         val key = md5Key(pages.first())
-        currentPicKey = key
-        //先显示缓存，无则 loading
-        PicGenManager.cachedBitmap(key)?.let {
-            picWindow.setBitmap(it)
-        } ?: picWindow.showLoading()
+        //同页不重复刷新（翻页回调多次触发时防闪烁）
+        if (key != currentPicKey) {
+            currentPicKey = key
+            //先显示缓存，无则 loading（loading 保留旧图叠转圈）
+            PicGenManager.cachedBitmap(key)?.let {
+                picWindow.setBitmap(it)
+            } ?: picWindow.showLoading()
+        }
         PicGenManager.onVisiblePagesChanged(pages)
     }
 
