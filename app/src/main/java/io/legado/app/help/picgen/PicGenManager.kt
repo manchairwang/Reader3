@@ -9,6 +9,7 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.http.postJson
+import io.legado.app.constant.AppLog
 import io.legado.app.utils.LogUtils
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -32,10 +33,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * ��ͼ����������ֲ�� LayaAirReaderWithPic Gen.ts����
- * - ���� �� �ؼ��� �� TAGS LLM�����٣��� ���򶵵� �� ��ͼ��agnes/omni ˫�徺�� + pony/qwen ���أ�
- * - ��ҳ���� diff����ҳʱ�жϲ�����Ҫ���������еļ���
- * - ���� + �ڴ滺��
+ * 生图管理器（移植自 LayaAirReaderWithPic Gen.ts）：
+ * - 文字 → 关键字 → TAGS LLM（竞速）→ 正则兜底 → 生图（agnes/omni 双族竞速 + pony/qwen 本地）
+ * - 翻页任务集 diff：换页时中断不再需要的任务，命中的继续
+ * - 磁盘 + 内存缓存
  */
 object PicGenManager {
 
@@ -43,35 +44,35 @@ object PicGenManager {
     private val gson = Gson()
     private const val IMG_TIMEOUT_MS = 180_000L
     private const val CHAT_TIMEOUT_MS = 90_000L
-    private const val COOLDOWN_SEC = 45L          //����ʧ����ȴ
-    private const val MAX_FAIL = 2                //����ʧ�ܴ�����ֵ
-    private const val PEEK_PAGES = 2              //Ԥ��ҳ������ǰҳ + �� 2 ҳ
-    private const val MAX_CONCURRENT = 5         //������������
+    private const val COOLDOWN_SEC = 45L          //连续失败冷却
+    private const val MAX_FAIL = 2                //连续失败次数阈值
+    private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
+    private const val MAX_CONCURRENT = 5         //并发任务上限
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    //����
+    //缓存
     private val cacheDir by lazy { File(appCtx.cacheDir, "picgen").apply { mkdirs() } }
     private val memCache = object : LruCache<String, Bitmap>(12) {
         override fun sizeOf(key: String, value: Bitmap): Int = 1
     }
 
-    //������cacheKey -> Job����ҳ diff ��
+    //任务表：cacheKey -> Job；换页 diff 用
     private val jobs = ConcurrentHashMap<String, Job>()
     private val jobsMutex = Mutex()
 
-    //��ȴ���·�� key -> �ָ�ʱ���
+    //冷却表：路由 key -> 恢复时间戳
     private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val failCount = ConcurrentHashMap<String, Int>()
     private val routeMutex = Mutex()
 
-    //�ֻ�������
+    //轮换计数器
     @Volatile
     private var agnesRR = 0
     @Volatile
     private var omniRR = 0
 
-    /** ����ص���cacheKey -> bitmap */
+    /** 结果回调：cacheKey -> bitmap */
     @Volatile
     var onImageReady: ((cacheKey: String, bitmap: Bitmap, source: String) -> Unit)? = null
 
@@ -79,8 +80,8 @@ object PicGenManager {
     var onStatus: ((cacheKey: String, status: String) -> Unit)? = null
 
     /**
-     * ��ҳ/���غ���ã��ع����񼯡�
-     * @param pages �ɼ�+Ԥ��ҳ�����б�
+     * 翻页/加载后调用：重估任务集。
+     * @param pages 可见+预读页文字列表
      */
     fun onVisiblePagesChanged(pages: List<String>) {
         if (!PicGenConfig.windowShow) return
@@ -90,7 +91,7 @@ object PicGenManager {
         if (cleaned.isEmpty()) return
         scope.launch {
             val keys = cleaned.map { pageKey(it) }.toSet()
-            //diff��ͣ�������Ҫ������
+            //diff：停掉不再需要的任务
             jobsMutex.withLock {
                 val toCancel = jobs.filterKeys { it !in keys }
                 toCancel.values.forEach { it.cancel() }
@@ -107,7 +108,7 @@ object PicGenManager {
         jobs.clear()
     }
 
-    /** ��ҳ��ͼ����������ֱ�ӻص������������� */
+    /** 单页生图：缓存命中直接回调，否则起任务 */
     private suspend fun genFor(cacheKey: String, pageText: String) {
         if (jobs.containsKey(cacheKey)) return
         if (jobs.size >= MAX_CONCURRENT) return
@@ -125,22 +126,27 @@ object PicGenManager {
         }
         val job = scope.launch {
             try {
-                status(cacheKey, "������ʾ�ʡ�")
+                status(cacheKey, "生成提示词…")
                 val prompt = buildPrompt(pageText)
-                status(cacheKey, "����ͼƬ��")
+                status(cacheKey, "生成图片…")
                 val (bytes, source) = generateImage(prompt)
                 if (isBlackImage(bytes)) {
-                    throw IllegalStateException("��ͼ����ȫ��ͼ")
+                    throw IllegalStateException("生图返回全黑图")
                 }
-                val bmp = decodeBytes(bytes) ?: throw IllegalStateException("ͼƬ����ʧ��")
+                val bmp = decodeBytes(bytes) ?: throw IllegalStateException("图片解码失败")
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
+                    val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道开关: " +
+                        "agnes_cn=${PicGenConfig.channelAgnesCn} agnes_com=${PicGenConfig.channelAgnesCom} " +
+                        "omni_win=${PicGenConfig.channelOmniWin} omni_cat=${PicGenConfig.channelOmniCat} " +
+                        "pony=${PicGenConfig.channelPony} qwen=${PicGenConfig.channelQwen}"
                     LogUtils.d(TAG, "gen fail: ${e.message}")
+                    AppLog.putNotSave(detail, e)
                     withContext(Dispatchers.Main) {
-                        onStatus?.invoke(cacheKey, "ʧ��: ${e.message?.take(40)}")
+                        onStatus?.invoke(cacheKey, "失败（点击复制）: ${e.message?.take(40)}")
                     }
                 }
             } finally {
@@ -150,7 +156,7 @@ object PicGenManager {
         jobs[cacheKey] = job
     }
 
-    /** ��ʾ�ʣ�LLM ���ٿ����� TAGS��ȫ��/�ر��߱������򶵵� */
+    /** 提示词：LLM 竞速可用走 TAGS，全挂/关闭走本地正则兜底 */
     private suspend fun buildPrompt(pageText: String): String {
         if (!PicGenConfig.llmEnable) {
             return PromptBuilder.buildFallbackPrompt(pageText)
@@ -159,11 +165,11 @@ object PicGenManager {
         return summary ?: PromptBuilder.buildFallbackPrompt(pageText)
     }
 
-    // ---- TAGS LLM ���٣�omni ���� combo �� ˫�� + agnes �ı�ģ�ͣ����ȳɹ�Ӯ ----
+    // ---- TAGS LLM 竞速：omni 优先 combo × 双机 + agnes 文本模型，最先成功赢 ----
     private suspend fun chatRace(pageText: String): String? {
         val prompt = PromptBuilder.buildSummaryPrompt(pageText)
         val tasks = ArrayList<suspend () -> String?>()
-        //omni ����
+        //omni 网关
         for (host in PicGenChannels.OMNI_HOSTS) {
             val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
             if (!chOn) continue
@@ -171,7 +177,7 @@ object PicGenManager {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
         }
-        //agnes �ı�ģ�Ͷ���
+        //agnes 文本模型兜底
         for (site in PicGenChannels.AGNES_SITES) {
             val chOn = if (site.key == "agnes_cn") PicGenConfig.channelAgnesCn else PicGenConfig.channelAgnesCom
             if (!chOn) continue
@@ -198,8 +204,8 @@ object PicGenManager {
             )
             val data = withTimeoutOrNull(CHAT_TIMEOUT_MS) {
                 postJsonRequest("$base/v1/chat/completions", body, token)
-            } ?: throw IllegalStateException("chat ��ʱ")
-            val obj = parseJson(data) ?: throw IllegalStateException("chat ��Ӧ����ʧ��")
+            } ?: throw IllegalStateException("chat 超时")
+            val obj = parseJson(data) ?: throw IllegalStateException("chat 响应解析失败")
             val text = obj.getAsJsonArray("choices")?.get(0)?.asJsonObject
                 ?.getAsJsonObject("message")?.get("content")?.asString ?: ""
             recordSuccess(rkey)
@@ -211,29 +217,29 @@ object PicGenManager {
         }
     }
 
-    // ---- ��ͼ��agnes �� omni ˫�岢�о��٣����ȳɹ�Ӯ������ pony/qwen ̽����� ----
+    // ---- 生图：agnes 与 omni 双族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
-        //agnes ��
+        //agnes 族
         if (PicGenConfig.channelAgnesCn || PicGenConfig.channelAgnesCom) {
             families.add { imageAgnes(prompt) }
         }
-        //omni ��
+        //omni 族
         if (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) {
             families.add { imageOmniroute(prompt) }
         }
-        //������
+        //本地族
         if (PicGenConfig.channelPony) {
             families.add { localTxt2Img(PicGenChannels.PONY_BASE, PromptBuilder.buildPonyPrompt(prompt))?.let { it to "pony@local" } }
         }
         if (PicGenConfig.channelQwen) {
             families.add { localTxt2Img(PicGenChannels.QWEN_BASE, prompt.take(900))?.let { it to "qwen@local" } }
         }
-        if (families.isEmpty()) throw IllegalStateException("û�������κ���ͼ����")
+        if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
         val result = raceFirst(families.map { scope.async { it() } }) { it != null }
         @Suppress("UNCHECKED_CAST")
         return result as? Pair<ByteArray, String>
-            ?: throw IllegalStateException("ȫ����ͼ����ʧ��")
+            ?: throw IllegalStateException("全部生图渠道失败")
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
@@ -244,7 +250,7 @@ object PicGenManager {
             site.tokens.forEach { tk -> combos.add(Triple(site.base, tk, site.key)) }
         }
         if (combos.isEmpty()) return null
-        //һ������������δ��ȴ�� token ����һ���������ȳ�ͼӮ
+        //一波并发：所有未冷却的 token 各发一个请求，最先出图赢
         val tasks = combos.mapIndexed { ti, (base, tk, siteKey) ->
             val model = PicGenChannels.AGNES_IMAGE_MODELS[(ti + agnesRR) % PicGenChannels.AGNES_IMAGE_MODELS.size]
             scope.async {
@@ -289,7 +295,7 @@ object PicGenManager {
         }
         if (combos.isEmpty()) return null
         var lastErr: String? = null
-        //�ֻ�˳���ԣ��� LayaAir һ�£�ʧ����ȴ������
+        //轮换顺序尝试（与 LayaAir 一致：失败冷却跳过）
         for (k in combos.indices) {
             val (base, tk, hostName) = combos[(omniRR + k) % combos.size]
             val model = PicGenChannels.OMNI_IMAGE_MODELS[(k + omniRR) % PicGenChannels.OMNI_IMAGE_MODELS.size]
@@ -307,9 +313,9 @@ object PicGenManager {
                 )
                 val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
                     postJsonRequest("$base/v1/images/generations", body, tk)
-                } ?: throw IllegalStateException("��ʱ")
+                } ?: throw IllegalStateException("超时")
                 val item = parseImageResponse(data)
-                    ?: throw IllegalStateException("��Ӧ�� b64_json Ҳ�� url")
+                    ?: throw IllegalStateException("响应无 b64_json 也无 url")
                 recordSuccess(rkey)
                 omniRR = (omniRR + k + 1) % combos.size
                 return item.first to "${model}@${hostName}"
@@ -327,7 +333,7 @@ object PicGenManager {
         val rkey = "local:$base"
         if (!routeAvailable(rkey)) return null
         return try {
-            //OpenAI ���ݸ�ʽ����
+            //OpenAI 兼容格式优先
             val body = gson.toJson(
                 mapOf(
                     "prompt" to prompt,
@@ -344,7 +350,7 @@ object PicGenManager {
                 recordSuccess(rkey)
                 return item.first
             }
-            //sdapi/v1/txt2img ����
+            //sdapi/v1/txt2img 兜底
             val body2 = gson.toJson(
                 mapOf(
                     "prompt" to prompt,
@@ -386,7 +392,7 @@ object PicGenManager {
             .build()
             .newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-                return response.body?.string() ?: throw IllegalStateException("����Ӧ")
+                return response.body?.string() ?: throw IllegalStateException("空响应")
             }
     }
 
@@ -394,11 +400,11 @@ object PicGenManager {
         val request = Request.Builder().url(url).build()
         okHttpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-            return response.body?.bytes() ?: throw IllegalStateException("����Ӧ")
+            return response.body?.bytes() ?: throw IllegalStateException("空响应")
         }
     }
 
-    /** ������ͼ��Ӧ��b64_json �� url ˫��ʽ */
+    /** 解析生图响应：b64_json 或 url 双格式 */
     private suspend fun parseImageResponse(data: String): Pair<ByteArray, Unit>? {
         val obj = parseJson(data) ?: return null
         val arr = obj.getAsJsonArray("data") ?: return null
@@ -415,7 +421,7 @@ object PicGenManager {
         return null
     }
 
-    // ---- ���ٹ��ߣ���һ async �ɹ������أ����� cancel ----
+    // ---- 竞速工具：任一 async 成功即返回，其余 cancel ----
     private suspend fun raceFirst(
         deferred: List<Deferred<Any?>>,
         ok: (Any?) -> Boolean
@@ -450,7 +456,7 @@ object PicGenManager {
         return result
     }
 
-    // ---- ��ȴ·�� ----
+    // ---- 冷却路由 ----
     private suspend fun routeAvailable(rkey: String): Boolean = routeMutex.withLock {
         val until = cooldownUntil[rkey] ?: 0
         until <= System.currentTimeMillis()
@@ -470,7 +476,7 @@ object PicGenManager {
         }
     }
 
-    // ---- ���� ----
+    // ---- 工具 ----
     private fun pageKey(text: String): String {
         val digest = MessageDigest.getInstance("MD5")
             .digest(text.toByteArray(Charsets.UTF_8))
@@ -484,7 +490,7 @@ object PicGenManager {
     private fun decodeBytes(bytes: ByteArray): Bitmap? =
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
 
-    /** ȫ��ͼ��⣨��ֲ�� LayaAir Cache.ts���Ͳ�����ֵ�� */
+    /** 全黑图检测（移植自 LayaAir Cache.ts：低采样均值） */
     private fun isBlackImage(bytes: ByteArray): Boolean {
         val opts = BitmapFactory.Options().apply { inSampleSize = 8 }
         val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return false
@@ -505,7 +511,7 @@ object PicGenManager {
         }
         bmp.recycle()
         val avg = if (sampled == 0) 255.0 else sum.toDouble() / sampled / 3.0
-        return avg < 8.0   //��ֵ < 8 ��Ϊȫ��
+        return avg < 8.0   //均值 < 8 视为全黑
     }
 
     private suspend fun status(key: String, s: String) {
@@ -514,7 +520,7 @@ object PicGenManager {
 
     fun cachedBitmap(cacheKey: String): Bitmap? = memCache.get(cacheKey)
 
-    /** Gson ���� JSON �ַ���Ϊ JsonObject */
+    /** Gson 解析 JSON 字符串为 JsonObject */
     private fun parseJson(data: String?): JsonObject? {
         if (data.isNullOrBlank()) return null
         return try {

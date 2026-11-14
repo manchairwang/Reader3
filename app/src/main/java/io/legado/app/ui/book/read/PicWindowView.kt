@@ -11,6 +11,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import io.legado.app.R
 import io.legado.app.help.picgen.PicGenConfig
+import io.legado.app.utils.sendToClip
 
 /**
  * 阅读页图片窗口：竖屏在正文下方、横屏在正文右侧。
@@ -40,6 +41,13 @@ class PicWindowView @JvmOverloads constructor(
             visibility = GONE
             onClose?.invoke()
         }
+        //点击错误/状态文字：复制到剪贴板
+        tvStatus.setOnClickListener {
+            val text = tvStatus.text.toString()
+            if (text.isNotBlank()) {
+                context.sendToClip(text)
+            }
+        }
     }
 
     fun setBitmap(bitmap: Bitmap) {
@@ -57,11 +65,14 @@ class PicWindowView @JvmOverloads constructor(
 
     fun showError(msg: String) {
         pbPic.visibility = GONE
+        ivPic.visibility = GONE
         tvStatus.visibility = VISIBLE
         tvStatus.text = msg
     }
 
     fun showStatus(msg: String) {
+        //错误信息保留不被进度覆盖（点击可复制）
+        if (tvStatus.visibility == VISIBLE && tvStatus.text.startsWith("失败")) return
         if (ivPic.visibility != VISIBLE) {
             pbPic.visibility = VISIBLE
             tvStatus.visibility = VISIBLE
