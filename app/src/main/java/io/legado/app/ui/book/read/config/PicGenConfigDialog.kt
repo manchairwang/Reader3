@@ -27,6 +27,7 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
             it.attributes = attr
         }
         setLayout(0.9f, ViewGroup.LayoutParams.WRAP_CONTENT)
+        dialog?.setCanceledOnTouchOutside(true)
     }
 
     override fun onFragmentCreated(view: android.view.View, savedInstanceState: Bundle?) {

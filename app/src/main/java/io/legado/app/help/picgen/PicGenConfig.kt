@@ -22,14 +22,16 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
         get() = if (contains(PreferKey.picWindowShow)) getBoolean(PreferKey.picWindowShow) else true
         set(value) = putBoolean(PreferKey.picWindowShow, value)
 
-    //竖屏：图片窗口高度占屏幕高度比例
+    //竖屏：图片窗口高度占屏幕高度比例（旧默认 0.30 自动升级 0.45）
     var heightRatio: Float
-        get() = getFloat(PreferKey.picWindowHeightRatio, 0.30f).takeIf { it > 0f } ?: 0.30f
+        get() = getFloat(PreferKey.picWindowHeightRatio, 0f)
+            .takeIf { it >= 0.15f && it != 0.30f } ?: 0.45f
         set(value) = putFloat(PreferKey.picWindowHeightRatio, value)
 
-    //横屏：图片窗口宽度占屏幕宽度比例
+    //横屏：图片窗口宽度占屏幕宽度比例（旧默认 0.30 自动升级 0.45）
     var widthRatio: Float
-        get() = getFloat(PreferKey.picWindowWidthRatio, 0.30f).takeIf { it > 0f } ?: 0.30f
+        get() = getFloat(PreferKey.picWindowWidthRatio, 0f)
+            .takeIf { it >= 0.15f && it != 0.30f } ?: 0.45f
         set(value) = putFloat(PreferKey.picWindowWidthRatio, value)
 
     //渠道开关

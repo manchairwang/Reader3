@@ -53,6 +53,8 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
             attributes = attr
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
+        //点正文区域关闭弹窗（否则弹窗 window 拦截触摸，正文点击无响应）
+        dialog?.setCanceledOnTouchOutside(true)
     }
 
     override fun onFragmentCreated(view: View, savedInstanceState: Bundle?) {
