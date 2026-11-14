@@ -17,6 +17,7 @@ import io.legado.app.databinding.DialogReadBookStyleBinding
 import io.legado.app.databinding.ItemReadStyleBinding
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
+import io.legado.app.help.picgen.PicGenConfig
 import io.legado.app.lib.dialogs.selector
 import io.legado.app.lib.theme.accentColor
 import io.legado.app.lib.theme.bottomBackground
@@ -75,6 +76,7 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
         tvPageAnim.setTextColor(textColor)
         tvBgTs.setTextColor(textColor)
         tvShareLayout.setTextColor(textColor)
+        tvPicWindowLabel.setTextColor(textColor)
         dsbTextSize.valueFormat = {
             (it + 5).toString()
         }
@@ -102,11 +104,16 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
 
     private fun initData() {
         binding.cbShareLayout.isChecked = ReadBookConfig.shareLayout
+        binding.cbPicWindow.isChecked = PicGenConfig.windowShow
         upView()
         styleAdapter.setItems(ReadBookConfig.configList)
     }
 
     private fun initViewEvent() = binding.run {
+        cbPicWindow.onCheckedChangeListener = { _, isChecked ->
+            PicGenConfig.windowShow = isChecked
+            (activity as? ReadBookActivity)?.onPicConfigChanged()
+        }
         chineseConverter.onChanged {
             ChineseUtils.unLoad(*TransType.entries.toTypedArray())
             postEvent(EventBus.UP_CONFIG, arrayListOf(5))
