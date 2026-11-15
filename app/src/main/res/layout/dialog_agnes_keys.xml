@@ -58,4 +58,38 @@
         android:minLines="3"
         android:textSize="13sp" />
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/btn_keys_ok"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_pic_style_selected"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="@string/pic_style_ok"
+            android:textColor="#FF6750A4"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/btn_keys_cancel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_pic_style_normal"
+            android:gravity="center"
+            android:padding="12dp"
+            android:text="@string/agnes_keys_cancel"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
 </LinearLayout>

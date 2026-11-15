@@ -13,9 +13,11 @@ import io.legado.app.utils.setLayout
 
 /**
  * agnes key 编辑：agnes-ai.cn / agnes-ai.com 两个独立输入框，各可多行多个 key。
- * 保存后分别加入对应站的生图竞速池。
+ * 保存后分别加入对应站的生图竞速池。确定=保存关闭；取消=放弃关闭。
  */
 class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
+
+    private var saveOnDismiss = false
 
     override fun onStart() {
         super.onStart()
@@ -35,10 +37,18 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
             .setText(PicGenConfig.agnesKeysCn)
         view.findViewById<EditText>(R.id.et_agnes_keys_com)
             .setText(PicGenConfig.agnesKeysCom)
+        view.findViewById<View>(R.id.btn_keys_ok).setOnClickListener {
+            saveOnDismiss = true
+            dismissAllowingStateLoss()
+        }
+        view.findViewById<View>(R.id.btn_keys_cancel).setOnClickListener {
+            dismissAllowingStateLoss()
+        }
     }
 
     override fun onDismiss(dialog: DialogInterface) {
         super.onDismiss(dialog)
+        if (!saveOnDismiss) return
         view?.findViewById<EditText>(R.id.et_agnes_keys_cn)?.let {
             PicGenConfig.agnesKeysCn = it.text.toString().trim()
         }
