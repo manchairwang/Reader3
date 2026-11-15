@@ -1235,6 +1235,10 @@
     <string name="pic_window">图片窗口</string>
     <string name="pic_window_close">关闭图片窗口</string>
     <string name="pic_gen_config">图片窗口设置</string>
+    <string name="pic_style_config">生图风格</string>
+    <string name="pic_style_clear">清除风格</string>
+    <string name="pic_style_none">当前：未选择（生图不附加风格）</string>
+    <string name="pic_style_current">当前：%1$s</string>
     <string name="pic_window_show">显示图片窗口</string>
     <string name="pic_window_height_ratio">竖屏窗口高度比例</string>
     <string name="pic_window_width_ratio">横屏窗口宽度比例</string>

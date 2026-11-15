@@ -10,6 +10,7 @@ import com.google.gson.JsonParser
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.http.postJson
 import io.legado.app.constant.AppLog
+import io.legado.app.model.ReadBook
 import io.legado.app.utils.LogUtils
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -182,7 +183,7 @@ object PicGenManager {
         val job = scope.launch {
             try {
                 status(cacheKey, "生成提示词…")
-                val prompt = buildPrompt(pageText)
+                val prompt = applyStyle(buildPrompt(pageText))
                 status(cacheKey, "生成图片…")
                 val (bytes, source) = generateImage(prompt)
                 if (isBlackImage(bytes)) {
@@ -218,6 +219,12 @@ object PicGenManager {
         }
         val summary = chatRace(pageText)
         return summary ?: PromptBuilder.buildFallbackPrompt(pageText)
+    }
+
+    /** 追加当前书选中的生图风格提示词（未选则原样返回） */
+    private fun applyStyle(prompt: String): String {
+        val style = PicStyleConfig.promptFor(ReadBook.book) ?: return prompt
+        return "$prompt. $style"
     }
 
     // ---- TAGS LLM 竞速：omni 优先 combo × 双机 + agnes 文本模型，最先成功赢 ----
