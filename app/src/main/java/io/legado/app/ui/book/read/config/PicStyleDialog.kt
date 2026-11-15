@@ -89,11 +89,12 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
         private val ivStyle: ImageView = view.findViewById(R.id.iv_style)
         private val ivCheck: ImageView = view.findViewById(R.id.iv_check)
         private val tvPrompt: TextView = view.findViewById(R.id.tv_prompt)
+        private val flImage: View = view.findViewById(R.id.fl_image)
 
         fun bind(style: PicStyleConfig.Style) {
             val bmp: Bitmap? = PicStyleConfig.thumb(style.index)
             if (bmp != null) ivStyle.setImageBitmap(bmp)
-            //每行3张方图：把图裁成正方形显示
+            //方图：高随宽度自适应
             ivStyle.post {
                 val side = ivStyle.width
                 if (side > 0) {
@@ -103,7 +104,13 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
                 }
             }
             tvPrompt.text = style.name
-            ivCheck.visible(PicStyleConfig.styleIndex(ReadBook.book) == style.index)
+            val selected = PicStyleConfig.styleIndex(ReadBook.book) == style.index
+            ivCheck.visible(selected)
+            //选中：彩色加粗边框；未选：细灰边框
+            flImage.setBackgroundResource(
+                if (selected) R.drawable.bg_pic_style_selected
+                else R.drawable.bg_pic_style_normal
+            )
             itemView.setOnClickListener {
                 PicStyleConfig.setStyle(ReadBook.book, style.index)
                 upCurrent()

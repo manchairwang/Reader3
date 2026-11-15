@@ -3,13 +3,15 @@
     android:id="@+id/item_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?attr/selectableItemBackground"
     android:orientation="vertical"
     android:padding="4dp">
 
     <FrameLayout
+        android:id="@+id/fl_image"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content">
+        android:layout_height="wrap_content"
+        android:background="@drawable/bg_pic_style_normal"
+        android:padding="3dp">
 
         <ImageView
             android:id="@+id/iv_style"
@@ -34,11 +36,11 @@
     <TextView
         android:id="@+id/tv_prompt"
         android:layout_width="match_parent"
-        android:layout_height="36dp"
+        android:layout_height="20dp"
         android:ellipsize="end"
-        android:gravity="top"
-        android:maxLines="2"
+        android:gravity="center"
+        android:maxLines="1"
         android:textColor="?android:attr/textColorSecondary"
-        android:textSize="10sp" />
+        android:textSize="11sp" />
 
 </LinearLayout>
