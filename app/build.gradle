@@ -20,7 +20,7 @@ static def releaseTime() {
 }
 
 def name = "legado"
-def version = "1.0"
+def version = "1.1.9"
 def gitCommits = Integer.parseInt('git rev-list HEAD --count'.execute().text.trim())
 
 android {
@@ -51,7 +51,7 @@ android {
         minSdk 21
         targetSdk 36
         versionCode 10000 + gitCommits
-        versionName version
+        versionName "${version}.${gitCommits}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         project.ext.set("archivesBaseName", name + "_" + version)
 
@@ -95,7 +95,7 @@ android {
             manifestPlaceholders.put("app_name", "@string/app_name")
 
             applicationIdSuffix '.debug'
-            versionNameSuffix 'debug'
+            versionNameSuffix '-debug'
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro', 'cronet-proguard-rules.pro'
         }
