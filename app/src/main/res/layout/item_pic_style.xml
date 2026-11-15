@@ -14,7 +14,7 @@
         <ImageView
             android:id="@+id/iv_style"
             android:layout_width="match_parent"
-            android:layout_height="120dp"
+            android:layout_height="180dp"
             android:background="#22000000"
             android:contentDescription="@string/pic_style_config"
             android:scaleType="centerCrop" />

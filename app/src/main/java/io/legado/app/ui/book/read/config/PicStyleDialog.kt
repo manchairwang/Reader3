@@ -38,7 +38,8 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
             attr.gravity = Gravity.CENTER
             it.attributes = attr
         }
-        setLayout(0.92f, ViewGroup.LayoutParams.WRAP_CONTENT)
+        //接近全屏：宽 96%，高占屏幕 92%
+        setLayout(0.96f, 0.92f)
         dialog?.setCanceledOnTouchOutside(true)
     }
 
@@ -50,7 +51,7 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
             upCurrent()
             (rvStyle.adapter as? StyleAdapter)?.notifyDataSetChanged()
         }
-        rvStyle.layoutManager = GridLayoutManager(requireContext(), 3)
+        rvStyle.layoutManager = GridLayoutManager(requireContext(), 2)
         rvStyle.adapter = StyleAdapter()
         upCurrent()
     }
