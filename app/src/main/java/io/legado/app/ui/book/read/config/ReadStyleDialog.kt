@@ -49,11 +49,11 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
             decorView.setPadding(0, 0, 0, 0)
             val attr = attributes
             attr.dimAmount = 0.0f
-            attr.gravity = Gravity.BOTTOM
+            attr.gravity = Gravity.CENTER
             attributes = attr
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
-        //点正文区域关闭弹窗（否则弹窗 window 拦截触摸，正文点击无响应）
+        //点外部区域关闭弹窗
         dialog?.setCanceledOnTouchOutside(true)
     }
 
