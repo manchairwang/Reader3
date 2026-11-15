@@ -1240,7 +1240,7 @@
     <string name="agnes_keys_hint">每行一个 key，可填多个。留空则只用内置 key。</string>
     <string name="agnes_keys_cn_title">agnes-ai.cn 的 key：</string>
     <string name="agnes_keys_com_title">agnes-ai.com 的 key：</string>
-    <string name="agnes_keys_example">例如：\nsk-V3bHQQy6Fhw0RnWznCyBrFAk6bSUziLeo8Kjqmey5iE21qlI\nsk-hEyUeEYPM3ojUyVWBVJnWS769274VheURRe3FNeyYXMLEp0G</string>
+    <string name="agnes_keys_example">例如：\nsk-xxxx…xxxx（每行一个，以 sk- 开头）\nsk-yyyy…yyyy</string>
     <string name="pic_style_clear">清除风格</string>
     <string name="pic_style_none">当前：未选择（生图不附加风格）</string>
     <string name="pic_style_current">当前：%1$s</string>
