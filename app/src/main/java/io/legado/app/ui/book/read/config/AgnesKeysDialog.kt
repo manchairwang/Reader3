@@ -4,7 +4,6 @@ import android.content.DialogInterface
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.EditText
 import io.legado.app.R
 import io.legado.app.base.BaseDialogFragment
@@ -28,7 +27,7 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
             attr.gravity = Gravity.CENTER
             it.attributes = attr
         }
-        setLayout(0.92f, ViewGroup.LayoutParams.WRAP_CONTENT)
+        setLayout(0.92f, 0.9f)
         dialog?.setCanceledOnTouchOutside(false)
     }
 
