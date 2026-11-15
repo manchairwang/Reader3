@@ -7,6 +7,7 @@ import io.legado.app.utils.getBoolean
 import io.legado.app.utils.getFloat
 import io.legado.app.utils.putBoolean
 import io.legado.app.utils.putFloat
+import io.legado.app.utils.putString
 import splitties.init.appCtx
 import splitties.init.appCtx
 
@@ -68,6 +69,11 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
     var tailscaleAutoDetect: Boolean
         get() = if (contains("picGenTailscaleAutoDetect")) getBoolean("picGenTailscaleAutoDetect") else true
         set(value) = putBoolean("picGenTailscaleAutoDetect", value)
+
+    //用户自定义 agnes key：多行文本（每行一个），生图时追加到各站 token 池
+    var agnesKeys: String
+        get() = getString("picGenAgnesKeys", null) ?: ""
+        set(value) = putString("picGenAgnesKeys", value)
 
     //运行时缓存：tailscale 网关可达状态（不持久化，每 10 分钟刷新）
     @Volatile

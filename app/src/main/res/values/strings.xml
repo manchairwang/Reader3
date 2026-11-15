@@ -1236,6 +1236,8 @@
     <string name="pic_window_close">关闭图片窗口</string>
     <string name="pic_gen_config">图片窗口设置</string>
     <string name="pic_style_config">生图风格</string>
+    <string name="agnes_keys_config">agnes Key 管理</string>
+    <string name="agnes_keys_hint">每行一个 key。以 cn/com 结尾自动分站，其余两站都参与竞速。留空则只用内置 key。</string>
     <string name="pic_style_clear">清除风格</string>
     <string name="pic_style_none">当前：未选择（生图不附加风格）</string>
     <string name="pic_style_current">当前：%1$s</string>

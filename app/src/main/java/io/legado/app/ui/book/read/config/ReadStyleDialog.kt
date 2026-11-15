@@ -145,6 +145,9 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
         tvPicStyle.setOnClickListener {
             PicStyleDialog().show(childFragmentManager, "picStyleDialog")
         }
+        tvAgnesKeys.setOnClickListener {
+            AgnesKeysDialog().show(childFragmentManager, "agnesKeysDialog")
+        }
         rgPageAnim.setOnCheckedChangeListener { _, checkedId ->
             ReadBook.book?.setPageAnim(-1)
             ReadBookConfig.pageAnim = binding.rgPageAnim.getIndexById(checkedId)
