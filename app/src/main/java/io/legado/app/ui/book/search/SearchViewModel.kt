@@ -42,9 +42,13 @@ class SearchViewModel(application: Application) : BaseViewModel(application) {
             isSearchLiveData.postValue(true)
         }
 
-        override fun onSearchSuccess(searchBooks: List<SearchBook>) {
-            searchBookLiveData.postValue(searchBooks)
+    override fun onSearchSuccess(searchBooks: List<SearchBook>) {
+        //搜索命中积分：本批返回图书的各源 +1（持久化，升级不丢）
+        searchBooks.map { it.bookSourceUrl }.distinct().filter { it.isNotBlank() }.let { urls ->
+            if (urls.isNotEmpty()) execute { io.legado.app.help.SearchScoreStore.hitAll(urls) }
         }
+        searchBookLiveData.postValue(searchBooks)
+    }
 
         override fun onSearchFinish(isEmpty: Boolean, hasMore: Boolean) {
             this@SearchViewModel.hasMore = hasMore
