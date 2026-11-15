@@ -1242,6 +1242,7 @@
     <string name="agnes_keys_com_title">agnes-ai.com 的 key：</string>
     <string name="agnes_keys_example">例如：\nsk-xxxx…xxxx（每行一个，以 sk- 开头）\nsk-yyyy…yyyy</string>
     <string name="pic_style_clear">清除风格</string>
+    <string name="pic_style_ok">确 定</string>
     <string name="pic_style_none">当前：未选择（生图不附加风格）</string>
     <string name="pic_style_current">当前：%1$s</string>
     <string name="pic_window_show">显示图片窗口</string>

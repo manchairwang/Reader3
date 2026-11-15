@@ -38,9 +38,9 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
             attr.gravity = Gravity.CENTER
             it.attributes = attr
         }
-        //接近全屏：宽 96%，高占屏幕 92%
-        setLayout(0.96f, 0.92f)
-        dialog?.setCanceledOnTouchOutside(true)
+        //全屏：宽高都占满
+        setLayout(1.0f, 0.98f)
+        dialog?.setCanceledOnTouchOutside(false)
     }
 
     override fun onFragmentCreated(view: View, savedInstanceState: Bundle?) {
@@ -50,6 +50,9 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
             PicStyleConfig.setStyle(ReadBook.book, 0)
             upCurrent()
             (rvStyle.adapter as? StyleAdapter)?.notifyDataSetChanged()
+        }
+        view.findViewById<TextView>(R.id.btn_style_ok).setOnClickListener {
+            dismissAllowingStateLoss()
         }
         rvStyle.layoutManager = GridLayoutManager(requireContext(), 2)
         rvStyle.adapter = StyleAdapter()
