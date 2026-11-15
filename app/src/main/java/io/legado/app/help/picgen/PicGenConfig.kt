@@ -70,10 +70,14 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
         get() = if (contains("picGenTailscaleAutoDetect")) getBoolean("picGenTailscaleAutoDetect") else true
         set(value) = putBoolean("picGenTailscaleAutoDetect", value)
 
-    //用户自定义 agnes key：多行文本（每行一个），生图时追加到各站 token 池
-    var agnesKeys: String
-        get() = getString("picGenAgnesKeys", null) ?: ""
-        set(value) = putString("picGenAgnesKeys", value)
+    //用户自定义 agnes key：cn / com 各自多行文本（每行一个 key），分别加入对应站竞速
+    var agnesKeysCn: String
+        get() = getString("picGenAgnesKeysCn", null) ?: ""
+        set(value) = putString("picGenAgnesKeysCn", value)
+
+    var agnesKeysCom: String
+        get() = getString("picGenAgnesKeysCom", null) ?: ""
+        set(value) = putString("picGenAgnesKeysCom", value)
 
     //运行时缓存：tailscale 网关可达状态（不持久化，每 10 分钟刷新）
     @Volatile

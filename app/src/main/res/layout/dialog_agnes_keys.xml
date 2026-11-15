@@ -22,15 +22,40 @@
         android:text="@string/agnes_keys_hint"
         android:textSize="12sp" />
 
-    <EditText
-        android:id="@+id/et_agnes_keys"
+    <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="12dp"
+        android:text="@string/agnes_keys_cn_title"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/et_agnes_keys_cn"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
         android:gravity="top"
-        android:hint="sk-..."
+        android:hint="@string/agnes_keys_example"
         android:inputType="textMultiLine|textNoSuggestions"
-        android:minLines="6"
+        android:minLines="3"
+        android:textSize="13sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/agnes_keys_com_title"
+        android:textSize="14sp" />
+
+    <EditText
+        android:id="@+id/et_agnes_keys_com"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:gravity="top"
+        android:hint="@string/agnes_keys_example"
+        android:inputType="textMultiLine|textNoSuggestions"
+        android:minLines="3"
         android:textSize="13sp" />
 
 </LinearLayout>

@@ -311,20 +311,17 @@ object PicGenManager {
             if (!chOn) continue
             site.tokens.forEach { tk -> combos.add(Triple(site.base, tk, site.key)) }
         }
-        //用户自定义 agnes key：每行一个，按前缀分站（sk-..cn/..com 无法区分时两站都试）
-        val userKeys = PicGenConfig.agnesKeys.split('\n', ',')
-            .map { it.trim() }
-            .filter { it.length > 8 }
-        for (tk in userKeys) {
-            val site = PicGenChannels.AGNES_SITES.firstOrNull { tk.endsWith(it.key) }
-            if (site != null) {
-                combos.add(Triple(site.base, tk, "agnes_user"))
+        //用户自定义 agnes key：cn/com 两个输入框各自多行，分别加入对应站竞速
+        for (site in PicGenChannels.AGNES_SITES) {
+            val custom = if (site.key == "agnes_cn") {
+                PicGenConfig.agnesKeysCn
             } else {
-                //无法识别站点：两站都加入竞速
-                PicGenChannels.AGNES_SITES.forEach { s ->
-                    combos.add(Triple(s.base, tk, "agnes_user"))
-                }
+                PicGenConfig.agnesKeysCom
             }
+            custom.split('\n', ',')
+                .map { it.trim() }
+                .filter { it.length > 8 }
+                .forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
         }
         if (combos.isEmpty()) return null
         //一波并发：所有未冷却的 token 各发一个请求，最先出图赢

@@ -12,8 +12,8 @@ import io.legado.app.help.picgen.PicGenConfig
 import io.legado.app.utils.setLayout
 
 /**
- * agnes key 编辑：多行输入（每行一个 key），保存后参与双站生图竞速。
- * key 以 cn/com 结尾可自动分站，其余两站都试。
+ * agnes key 编辑：agnes-ai.cn / agnes-ai.com 两个独立输入框，各可多行多个 key。
+ * 保存后分别加入对应站的生图竞速池。
  */
 class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
 
@@ -31,16 +31,19 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
     }
 
     override fun onFragmentCreated(view: View, savedInstanceState: Bundle?) {
-        val et = view.findViewById<EditText>(R.id.et_agnes_keys)
-        et.setText(PicGenConfig.agnesKeys)
-        dialog?.let { dlg ->
-            dlg.setTitle(getString(R.string.agnes_keys_config))
-        }
+        view.findViewById<EditText>(R.id.et_agnes_keys_cn)
+            .setText(PicGenConfig.agnesKeysCn)
+        view.findViewById<EditText>(R.id.et_agnes_keys_com)
+            .setText(PicGenConfig.agnesKeysCom)
     }
 
     override fun onDismiss(dialog: DialogInterface) {
         super.onDismiss(dialog)
-        val et = view?.findViewById<EditText>(R.id.et_agnes_keys) ?: return
-        PicGenConfig.agnesKeys = et.text.toString().trim()
+        view?.findViewById<EditText>(R.id.et_agnes_keys_cn)?.let {
+            PicGenConfig.agnesKeysCn = it.text.toString().trim()
+        }
+        view?.findViewById<EditText>(R.id.et_agnes_keys_com)?.let {
+            PicGenConfig.agnesKeysCom = it.text.toString().trim()
+        }
     }
 }
