@@ -16,3 +16,7 @@ package-lock.json
 .idea/
 # Kotlin 2.0
 .kotlin/
+
+"HarmonyRelease/.hvigor/"  
+"HarmonyRelease/entry/build/"  
+"HarmonyRelease/oh-package-lock.json5"  
