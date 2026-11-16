@@ -1,0 +1,10 @@
+{
+  "app": {
+    "bundleName": "com.reader3pic.harmony",
+    "vendor": "reader3pic",
+    "versionCode": 1000000,
+    "versionName": "1.2.13",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}
