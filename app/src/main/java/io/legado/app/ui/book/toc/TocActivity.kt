@@ -26,6 +26,7 @@ import io.legado.app.ui.file.HandleFileContract
 import io.legado.app.ui.widget.dialog.WaitDialog
 import io.legado.app.utils.applyTint
 import io.legado.app.utils.gone
+import io.legado.app.utils.startActivity
 import io.legado.app.utils.showDialogFragment
 import io.legado.app.utils.viewbindingdelegate.viewBinding
 import io.legado.app.utils.visible
@@ -166,6 +167,21 @@ class TocActivity : VMBaseActivity<ActivityChapterListBinding, TocViewModel>(),
             }
 
             R.id.menu_log -> showDialogFragment<AppLogDialog>()
+
+            //返回主菜单（书架）
+            R.id.menu_back_main -> {
+                startActivity(Intent(this, io.legado.app.ui.main.MainActivity::class.java))
+                finish()
+            }
+
+            //返回继续阅读当前书
+            R.id.menu_back_read -> {
+                viewModel.bookData.value?.let {
+                    startActivity<io.legado.app.ui.book.read.ReadBookActivity> {
+                        putExtra("bookUrl", it.bookUrl)
+                    }
+                } ?: finish()
+            }
         }
         return super.onCompatOptionsItemSelected(item)
     }

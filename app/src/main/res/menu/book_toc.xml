@@ -71,4 +71,14 @@
         android:title="@string/log"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/menu_back_read"
+        android:title="@string/toc_back_read"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/menu_back_main"
+        android:title="@string/toc_back_main"
+        app:showAsAction="never" />
+
 </menu>

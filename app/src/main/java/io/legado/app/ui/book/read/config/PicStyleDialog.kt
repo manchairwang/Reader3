@@ -51,7 +51,10 @@ class PicStyleDialog : BaseDialogFragment(R.layout.dialog_pic_style) {
             upCurrent()
             (rvStyle.adapter as? StyleAdapter)?.notifyDataSetChanged()
         }
-        view.findViewById<TextView>(R.id.btn_style_ok).setOnClickListener {
+        view.findViewById<TextView>(R.id.tv_ok).setOnClickListener {
+            dismissAllowingStateLoss()
+        }
+        view.findViewById<TextView>(R.id.tv_cancel).setOnClickListener {
             dismissAllowingStateLoss()
         }
         rvStyle.layoutManager = GridLayoutManager(requireContext(), 2)

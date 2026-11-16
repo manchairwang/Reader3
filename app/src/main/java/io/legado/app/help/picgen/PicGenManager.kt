@@ -50,6 +50,13 @@ object PicGenManager {
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
     private const val MAX_CONCURRENT = 5         //并发任务上限
 
+    //动态分辨率档位：前 n 页全部就绪 → 后续用高档；当前页未就绪 → 低档加速
+    private const val LOW_SIZE = "512x512"
+    private const val BASE_SIZE = "768x768"
+    private const val HIGH_SIZE = "1024x1024"
+    @Volatile
+    private var dynamicSizePx = BASE_SIZE
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
@@ -134,9 +141,6 @@ object PicGenManager {
 
     /**
      * 翻页/加载后调用：重估任务集。
-     * @param pages 可见+预读页文字列表
-     */
-    /**
      * @param pages (stableKey, 生图文字) 列表。stableKey 由调用方给（阅读位置，横竖屏不变）
      */
     fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
@@ -153,10 +157,24 @@ object PicGenManager {
                 toCancel.values.forEach { it.cancel() }
                 toCancel.keys.forEach { jobs.remove(it) }
             }
+            //动态分辨率：前 READY_AHEAD 页（当前+预读）是否全部就绪
+            val readyCount = keys.count { isReady(it) }
+            val allReady = readyCount >= keys.size && keys.isNotEmpty()
+            dynamicSizePx = when {
+                allReady -> HIGH_SIZE   //全部就绪 → 用高分辨率出图
+                readyCount == 0 -> LOW_SIZE  //当前页都没图 → 低分辨率加速
+                else -> BASE_SIZE
+            }
             cleaned.forEach { (key, text) ->
                 genFor(key, text)
             }
         }
+    }
+
+    /** 某页图片是否已就绪（内存缓存或磁盘缓存） */
+    private fun isReady(cacheKey: String): Boolean {
+        if (memCache.get(cacheKey) != null) return true
+        return File(cacheDir, "$cacheKey.png").exists()
     }
 
     fun onActivityDestroy() {
@@ -336,7 +354,7 @@ object PicGenManager {
                             "model" to model,
                             "prompt" to prompt.take(900),
                             "n" to 1,
-                            "size" to "768x768",
+                            "size" to dynamicSizePx,
                             "response_format" to "b64_json"
                         )
                     )
@@ -381,7 +399,7 @@ object PicGenManager {
                         "model" to model,
                         "prompt" to prompt.take(900),
                         "n" to 1,
-                        "size" to "768x768",
+                        "size" to dynamicSizePx,
                         "response_format" to "b64_json"
                     )
                 )
@@ -412,7 +430,7 @@ object PicGenManager {
                 mapOf(
                     "prompt" to prompt,
                     "n" to 1,
-                    "size" to "768x768",
+                    "size" to dynamicSizePx,
                     "response_format" to "b64_json"
                 )
             )

@@ -1244,6 +1244,8 @@
     <string name="pic_style_clear">清除风格</string>
     <string name="pic_style_ok">确 定</string>
     <string name="agnes_keys_cancel">取 消</string>
+    <string name="toc_back_read">返回继续阅读</string>
+    <string name="toc_back_main">返回主菜单</string>
     <string name="pic_style_none">当前：未选择（生图不附加风格）</string>
     <string name="pic_style_current">当前：%1$s</string>
     <string name="pic_window_show">显示图片窗口</string>

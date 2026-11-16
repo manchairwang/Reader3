@@ -36,11 +36,11 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
             .setText(PicGenConfig.agnesKeysCn)
         view.findViewById<EditText>(R.id.et_agnes_keys_com)
             .setText(PicGenConfig.agnesKeysCom)
-        view.findViewById<View>(R.id.btn_keys_ok).setOnClickListener {
+        view.findViewById<View>(R.id.tv_ok).setOnClickListener {
             saveOnDismiss = true
             dismissAllowingStateLoss()
         }
-        view.findViewById<View>(R.id.btn_keys_cancel).setOnClickListener {
+        view.findViewById<View>(R.id.tv_cancel).setOnClickListener {
             dismissAllowingStateLoss()
         }
     }
