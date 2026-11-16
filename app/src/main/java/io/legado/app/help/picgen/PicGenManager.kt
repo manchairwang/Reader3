@@ -50,10 +50,12 @@ object PicGenManager {
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
     private const val MAX_CONCURRENT = 5         //并发任务上限
 
-    //动态分辨率档位：前 n 页全部就绪 → 后续用高档；当前页未就绪 → 低档加速
+    //动态分辨率档位：综合就绪度+耗时决策（decideSize）
     private const val LOW_SIZE = "512x512"
     private const val BASE_SIZE = "768x768"
     private const val HIGH_SIZE = "1024x1024"
+    private const val FAST_MS = 2_000L    //耗时≤2s 视为足够快
+    private const val SLOW_MS = 30_000L   //耗时>30s 视为偏慢
     @Volatile
     private var dynamicSizePx = BASE_SIZE
 
@@ -157,14 +159,9 @@ object PicGenManager {
                 toCancel.values.forEach { it.cancel() }
                 toCancel.keys.forEach { jobs.remove(it) }
             }
-            //动态分辨率：前 READY_AHEAD 页（当前+预读）是否全部就绪
-            val readyCount = keys.count { isReady(it) }
-            val allReady = readyCount >= keys.size && keys.isNotEmpty()
-            dynamicSizePx = when {
-                allReady -> HIGH_SIZE   //全部就绪 → 用高分辨率出图
-                readyCount == 0 -> LOW_SIZE  //当前页都没图 → 低分辨率加速
-                else -> BASE_SIZE
-            }
+            //动态分辨率：综合 就绪度 + 近期生图耗时 决策
+            //目标：用户尽量少等待 → 图片质量尽量好
+            dynamicSizePx = decideSize(keys)
             cleaned.forEach { (key, text) ->
                 genFor(key, text)
             }
@@ -175,6 +172,56 @@ object PicGenManager {
     private fun isReady(cacheKey: String): Boolean {
         if (memCache.get(cacheKey) != null) return true
         return File(cacheDir, "$cacheKey.png").exists()
+    }
+
+    // ---- 生图耗时统计（全局滑动窗口，最近 6 次）----
+    private val genTimes = ArrayDeque<Long>(6)
+    private val genTimesMutex = Any()
+
+    /** 记录一次生图耗时（毫秒），source 形如 "model@site" */
+    private fun recordGenTime(ms: Long, @Suppress("UNUSED_PARAMETER") source: String) {
+        synchronized(genTimesMutex) {
+            genTimes.addLast(ms)
+            if (genTimes.size > 6) genTimes.removeFirst()
+        }
+        LogUtils.d(TAG, "gen time: ${ms}ms via $source size=$dynamicSizePx")
+    }
+
+    /** 近期平均生图耗时（毫秒），无样本返回 0 */
+    private fun avgGenTimeMs(): Long {
+        synchronized(genTimesMutex) {
+            if (genTimes.isEmpty()) return 0L
+            return genTimes.sum() / genTimes.size
+        }
+    }
+
+    /**
+     * 动态分辨率决策：综合 就绪度 + 近期耗时
+     * - 全部就绪 且 均耗时快(≤FAST_MS)  → 维持高档（够快，质量优先）
+     * - 全部就绪 但 均耗时慢(>SLOW_MS)  → 降回基准（别让下一张等太久）
+     * - 全部就绪 且 中等耗时            → 高档（有余量）
+     * - 当前页就绪、部分预读缺          → 中等耗时升高档，慢则基准
+     * - 当前页都没图                    → 快(≤FAST_MS)时基准即可（已够快），
+     *                                     慢时低档加速追赶
+     */
+    private fun decideSize(keys: Set<String>): String {
+        val readyCount = keys.count { isReady(it) }
+        val allReady = keys.isNotEmpty() && readyCount >= keys.size
+        val noneReady = readyCount == 0
+        val avg = avgGenTimeMs()
+        val noData = genTimesSize() == 0
+        return when {
+            allReady && (noData || avg <= SLOW_MS) -> HIGH_SIZE
+            allReady -> BASE_SIZE
+            noneReady && noData -> BASE_SIZE
+            noneReady && avg <= FAST_MS -> BASE_SIZE
+            noneReady -> LOW_SIZE
+            else -> if (avg <= FAST_MS) HIGH_SIZE else BASE_SIZE
+        }
+    }
+
+    private fun genTimesSize(): Int {
+        synchronized(genTimesMutex) { return genTimes.size }
     }
 
     fun onActivityDestroy() {
@@ -203,10 +250,13 @@ object PicGenManager {
                 status(cacheKey, "生成提示词…")
                 val prompt = applyStyle(buildPrompt(pageText))
                 status(cacheKey, "生成图片…")
+                val t0 = System.currentTimeMillis()
                 val (bytes, source) = generateImage(prompt)
                 if (isBlackImage(bytes)) {
                     throw IllegalStateException("生图返回全黑图")
                 }
+                //记录本次生图耗时（滑动窗口，供动态分辨率决策）
+                recordGenTime(System.currentTimeMillis() - t0, source)
                 val bmp = decodeBytes(bytes) ?: throw IllegalStateException("图片解码失败")
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
