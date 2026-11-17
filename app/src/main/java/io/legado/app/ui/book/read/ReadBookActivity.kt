@@ -1095,6 +1095,12 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
         //点右上角关闭按钮：切窗口后立即同步正文 margin，保证彻底收起
         picWindow.onClose = { upPicWindowLayout() }
+        //窗口手势翻页：与正文翻页一致（左滑/快滑下一页，右滑上一页），菜单打开时不响应
+        picWindow.onPageTurn = { next ->
+            if (!menuLayoutIsVisible) {
+                keyPage(if (next) PageDirection.NEXT else PageDirection.PREV)
+            }
+        }
         upPicWindowLayout()
     }
 

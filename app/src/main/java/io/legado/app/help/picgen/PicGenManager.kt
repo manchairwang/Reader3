@@ -168,30 +168,38 @@ object PicGenManager {
         return SvcModels(image.take(6), chat.sortedByDescending { prefer.containsMatchIn(it) }.take(6))
     }
 
-    /** GET /v1/models 解析模型 id 列表；失败返回 null */
-    private suspend fun discoverModels(base: String, token: String): List<String>? {
+    /** GET /v1/models 结果：ids 为 null 表示发现失败（httpCode/err 供诊断） */
+    data class ModelsDiscovery(val ids: List<String>?, val httpCode: Int?, val err: String?)
+
+    private suspend fun discoverModels(base: String, token: String): ModelsDiscovery {
         return try {
+            var code: Int? = null
             val data = withTimeoutOrNull(15_000L) {
-                val builder = Request.Builder().url("$base/v1/models")
-                builder.header("Authorization", "Bearer $token")
-                okHttpClient.newCall(builder.build()).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    resp.body?.string()
+                val req = Request.Builder().url("$base/v1/models")
+                    .header("Authorization", "Bearer $token")
+                    .build()
+                okHttpClient.newCall(req).execute().use { resp ->
+                    code = resp.code
+                    if (resp.isSuccessful) resp.body?.string() else null
                 }
-            } ?: return null
-            val obj = parseJson(data) ?: return null
-            val arr = obj.getAsJsonArray("data") ?: return null
-            arr.mapNotNull { it.asJsonObject?.get("id")?.takeIf { id -> !id.isJsonNull }?.asString }
+            }
+            if (data == null) return ModelsDiscovery(null, code, if (code == null) "超时" else null)
+            val obj = parseJson(data) ?: return ModelsDiscovery(null, code, "解析失败")
+            val arr = obj.getAsJsonArray("data") ?: return ModelsDiscovery(null, code, "无data")
+            ModelsDiscovery(
+                arr.mapNotNull { it.asJsonObject?.get("id")?.takeIf { id -> !id.isJsonNull }?.asString },
+                code, null
+            )
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            null
+            ModelsDiscovery(null, null, e.message ?: e.javaClass.simpleName)
         }
     }
 
     /** 某站可用模型组（缓存优先，缓存为空则现场发现一次） */
     private suspend fun svcModels(siteKey: String, base: String, token: String): SvcModels? {
         svcCache[siteKey]?.let { return it }
-        val models = discoverModels(base, token)?.let { classifyModels(it) }
+        val models = discoverModels(base, token).ids?.let { classifyModels(it) }
         if (models != null) svcCache[siteKey] = models
         return models
     }
@@ -212,7 +220,7 @@ object PicGenManager {
         }
         targets.map { (k, b, t) ->
             scope.async {
-                discoverModels(b, t)?.let { svcCache[k] = classifyModels(it) }
+                discoverModels(b, t).ids?.let { svcCache[k] = classifyModels(it) }
             }
         }.forEach { it.join() }
     }
@@ -232,17 +240,19 @@ object PicGenManager {
         }
         return try {
             val t0 = System.currentTimeMillis()
-            val svc = discoverModels(base, token)?.let { classifyModels(it) }
-            if (svc != null) svcCache[siteKey] = svc
+            //发现失败不算服务不可用：很多站（如 agnes）不提供 /v1/models，直接用兜底模型实测
+            val disc = discoverModels(base, token)
+            if (disc.ids != null) svcCache[siteKey] = classifyModels(disc.ids)
             val ms = System.currentTimeMillis() - t0
-            if (svc == null) {
-                "$siteKey: ✗ /v1/models 不可达"
+            val svc = svcCache[siteKey]
+            val chatModels = svc?.chat?.takeIf { it.isNotEmpty() } ?: fallbackChat
+            val chatRes = testChat(base, token, chatModels.first())
+            if (chatRes != null && chatRes.startsWith("✓")) {
+                "$siteKey: ✓ ${ms}ms · 发现模型${disc.ids?.size ?: 0}个(图${svc?.image?.size ?: 0}/文${svc?.chat?.size ?: 0}) " +
+                    "摘要模型[${chatModels.take(2).joinToString("/")}] · 实测 ${chatRes}"
             } else {
-                val imgStr = svc.image.take(2).joinToString("/").ifEmpty { "无" }
-                val chatModels = svc.chat.ifEmpty { fallbackChat }
-                val chatRes = testChat(base, token, chatModels.first())
-                "$siteKey: ✓ ${ms}ms · 文生图${svc.image.size}个[$imgStr…] " +
-                    "摘要${svc.chat.size}个[${chatModels.take(2).joinToString("/")}] · 摘要实测 ${chatRes ?: "✓"}"
+                "$siteKey: ✗ 摘要实测失败(${chatModels.first()}) ${chatRes ?: "无响应"} " +
+                    "· 发现: HTTP ${disc.httpCode ?: "-"} ${disc.err ?: ""}"
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e

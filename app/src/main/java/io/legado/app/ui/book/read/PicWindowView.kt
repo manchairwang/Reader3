@@ -3,7 +3,9 @@ package io.legado.app.ui.book.read
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.AttributeSet
+import android.view.GestureDetector
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -17,6 +19,7 @@ import io.legado.app.utils.sendToClip
  * 阅读页图片窗口：竖屏在正文下方、横屏在正文右侧。
  * 右上角关闭按钮：点击隐藏窗口（切换 PicGenConfig.windowShow）。
  * 图片未就绪时保留上一张图叠转圈，避免闪烁。
+ * 窗口上支持与正文相同的翻页手势：左右滑/快滑（fling）触发 [onPageTurn]。
  */
 class PicWindowView @JvmOverloads constructor(
     context: Context,
@@ -29,6 +32,39 @@ class PicWindowView @JvmOverloads constructor(
     private val btnClose: ImageView
 
     var onClose: (() -> Unit)? = null
+
+    /** 窗口手势翻页：true=下一页，false=上一页 */
+    var onPageTurn: ((next: Boolean) -> Unit)? = null
+
+    //与正文翻页一致的手势判定：横向位移为主即翻页，速度阈值同 PageDelegate fling
+    private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent): Boolean = true
+
+        override fun onFling(
+            e1: MotionEvent?,
+            e2: MotionEvent,
+            vx: Float,
+            vy: Float
+        ): Boolean {
+            if (e1 == null) return false
+            val dx = e2.x - e1.x
+            if (kotlin.math.abs(dx) < 50) return false
+            onPageTurn?.invoke(dx < 0)
+            return true
+        }
+
+        override fun onScroll(
+            e1: MotionEvent?,
+            e2: MotionEvent,
+            dx: Float,
+            dy: Float
+        ): Boolean {
+            if (e1 == null) return false
+            if (kotlin.math.abs(e2.x - e1.x) < 80) return false
+            onPageTurn?.invoke(e2.x - e1.x < 0)
+            return true
+        }
+    })
 
     init {
         LayoutInflater.from(context).inflate(R.layout.view_pic_window, this, true)
@@ -47,6 +83,10 @@ class PicWindowView @JvmOverloads constructor(
             if (text.isNotBlank()) {
                 context.sendToClip(text)
             }
+        }
+        setOnTouchListener { _, e ->
+            gestureDetector.onTouchEvent(e)
+            performClick()
         }
     }
 
