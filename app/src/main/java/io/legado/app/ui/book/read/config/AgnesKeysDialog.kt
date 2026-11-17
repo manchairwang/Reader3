@@ -5,14 +5,23 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.EditText
+import android.widget.TextView
+import androidx.lifecycle.lifecycleScope
 import io.legado.app.R
 import io.legado.app.base.BaseDialogFragment
+import io.legado.app.help.picgen.PicGenChannels
 import io.legado.app.help.picgen.PicGenConfig
+import io.legado.app.help.picgen.PicGenManager
 import io.legado.app.utils.setLayout
+import kotlinx.coroutines.launch
 
 /**
- * agnes key 编辑：agnes-ai.cn / agnes-ai.com 两个独立输入框，各可多行多个 key。
- * 保存后分别加入对应站的生图竞速池。确定=保存关闭；取消=放弃关闭。
+ * key 管理（3 个服务 5 个输入框）：
+ * ① agnes-ai.cn / agnes-ai.com（留空用内置 key）
+ * ② SenseNova 日日新 国内/国际（自备 key）
+ * ③ Nvidia NIM（自备 key）
+ * 「检 测」按钮并行检测每个服务第一个 key：模型发现 + 摘要实测，结果逐行回显。
+ * 确定=保存关闭；取消=放弃关闭。检测会即时刷新模型发现缓存。
  */
 class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
 
@@ -36,6 +45,12 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
             .setText(PicGenConfig.agnesKeysCn)
         view.findViewById<EditText>(R.id.et_agnes_keys_com)
             .setText(PicGenConfig.agnesKeysCom)
+        view.findViewById<EditText>(R.id.et_sensenova_keys_cn)
+            .setText(PicGenConfig.sensenovaKeysCn)
+        view.findViewById<EditText>(R.id.et_sensenova_keys_com)
+            .setText(PicGenConfig.sensenovaKeysCom)
+        view.findViewById<EditText>(R.id.et_nim_keys)
+            .setText(PicGenConfig.nimKeys)
         view.findViewById<View>(R.id.tv_ok).setOnClickListener {
             saveOnDismiss = true
             dismissAllowingStateLoss()
@@ -43,6 +58,54 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
         view.findViewById<View>(R.id.tv_cancel).setOnClickListener {
             dismissAllowingStateLoss()
         }
+        view.findViewById<View>(R.id.tv_test).setOnClickListener { testAll() }
+    }
+
+    private fun etText(id: Int): String? =
+        view?.findViewById<EditText>(id)?.text?.toString()?.trim()
+
+    private fun firstKey(text: String?): String? =
+        text?.split('\n', ',')?.map { it.trim() }?.firstOrNull { it.length > 8 }
+
+    /** 统一检测：每个服务取第一个 key（agnes 缺省用内置 key）并行测，结果逐行回显 */
+    private fun testAll() {
+        val tvBtn = view?.findViewById<TextView>(R.id.tv_test) ?: return
+        val tvResult = view?.findViewById<TextView>(R.id.tv_test_result) ?: return
+        tvResult.visibility = View.VISIBLE
+        tvResult.text = ""
+        tvBtn.text = getString(R.string.keys_testing)
+        //siteKey -> 测试 token
+        val targets = ArrayList<Pair<String, String>>()
+        firstKey(etText(R.id.et_agnes_keys_cn))?.let { targets.add("agnes_cn" to it) }
+            ?: PicGenChannels.AGNES_SITES.first { it.key == "agnes_cn" }.tokens.firstOrNull()
+                ?.let { targets.add("agnes_cn" to it) }
+        firstKey(etText(R.id.et_agnes_keys_com))?.let { targets.add("agnes_com" to it) }
+            ?: PicGenChannels.AGNES_SITES.first { it.key == "agnes_com" }.tokens.firstOrNull()
+                ?.let { targets.add("agnes_com" to it) }
+        firstKey(etText(R.id.et_sensenova_keys_cn))?.let { targets.add("sensenova_cn" to it) }
+        firstKey(etText(R.id.et_sensenova_keys_com))?.let { targets.add("sensenova_com" to it) }
+        firstKey(etText(R.id.et_nim_keys))?.let { targets.add("nim" to it) }
+        if (targets.isEmpty()) {
+            appendResult("没有可检测的 key")
+            tvBtn.text = getString(R.string.keys_test)
+            return
+        }
+        var pending = targets.size
+        targets.forEach { (siteKey, tk) ->
+            lifecycleScope.launch {
+                val line = PicGenManager.testService(siteKey, tk)
+                appendResult(line)
+                pending--
+                if (pending <= 0) {
+                    tvBtn.text = getString(R.string.keys_test)
+                }
+            }
+        }
+    }
+
+    private fun appendResult(msg: String) {
+        val tv = view?.findViewById<TextView>(R.id.tv_test_result) ?: return
+        tv.append(msg + "\n")
     }
 
     override fun onDismiss(dialog: DialogInterface) {
@@ -53,6 +116,15 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
         }
         view?.findViewById<EditText>(R.id.et_agnes_keys_com)?.let {
             PicGenConfig.agnesKeysCom = it.text.toString().trim()
+        }
+        view?.findViewById<EditText>(R.id.et_sensenova_keys_cn)?.let {
+            PicGenConfig.sensenovaKeysCn = it.text.toString().trim()
+        }
+        view?.findViewById<EditText>(R.id.et_sensenova_keys_com)?.let {
+            PicGenConfig.sensenovaKeysCom = it.text.toString().trim()
+        }
+        view?.findViewById<EditText>(R.id.et_nim_keys)?.let {
+            PicGenConfig.nimKeys = it.text.toString().trim()
         }
     }
 }

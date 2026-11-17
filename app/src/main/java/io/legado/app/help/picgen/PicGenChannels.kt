@@ -41,6 +41,47 @@ object PicGenChannels {
     //agnes 文本模型（提示词兜底）
     val AGNES_CHAT_MODELS = listOf("agnes-2.5-flash", "agnes-3.0-flash")
 
+    //SenseNova（日日新）OpenAI 兼容站（token 前缀端点）：用户自备 key，文本+文生图模型自动发现
+    val SENSENOVA_SITES = listOf(
+        AgnesSite(
+            key = "sensenova_cn",
+            base = "https://token.sensenova.cn",
+            tokens = listOf()
+        ),
+        AgnesSite(
+            key = "sensenova_com",
+            base = "https://token.sensenova.ai",
+            tokens = listOf()
+        )
+    )
+
+    //SenseNova 文本模型兜底（优先自动发现 /v1/models）
+    val SENSENOVA_CHAT_MODELS =
+        listOf("sensenova-6.8-flash-lite", "SenseChat-5", "SenseChat-Turbo")
+
+    //NVIDIA NIM（build.nvidia.com 注册，nvapi- 开头 key）：OpenAI 兼容，模型自动发现
+    val NIM_SITE = AgnesSite(
+        key = "nim",
+        base = "https://integrate.api.nvidia.com",
+        tokens = listOf()
+    )
+
+    //NIM 兜底模型（来源：build.nvidia.com 免费预览模型页；优先运行时自动发现 /v1/models 并实测）
+    //官方免费文生图：flux_1-dev / flux_1-schnell / flux_1-kontext-dev / flux.2-klein-4b /
+    //               flux-3-image-klein / stable-diffusion-3_5-large / qwen-image
+    val NIM_IMAGE_MODELS = listOf(
+        "black-forest-labs/flux.1-schnell",
+        "black-forest-labs/flux_1-schnell",
+        "black-forest-labs/flux_1-dev",
+        "qwen/qwen-image",
+        "stability-ai/stable-diffusion-3_5-large"
+    )
+    val NIM_CHAT_MODELS = listOf(
+        "meta/llama-3.3-70b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+        "step-5-preview"
+    )
+
     //omniroute 网关：tailscale win/cat + 本机
     val OMNI_HOSTS = listOf(
         OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-d5e5f6-932e7e52"),
@@ -54,12 +95,18 @@ object PicGenChannels {
     //omniroute 优先提示词 combo
     val PREFERRED_CHAT_COMBOS = listOf("mybestfast", "mygoodfast")
 
-    //本地生图
-    const val PONY_BASE = "http://127.0.0.1:1234"
-    const val PONY_NEG =
+    //本地生图：候选地址（本机优先，其次 tailscale win 机），后台探活自动启用
+    val PONY_HOSTS = listOf(
+        "http://127.0.0.1:1234",
+        "http://win.tail976197.ts.net:1234"
+    )
+    val PONY_NEG =
         "score_4, score_5, score_6, worst quality, low quality, jpeg artifacts, " +
                 "blurry, watermark, signature, text, bad anatomy, bad hands"
-    const val QWEN_BASE = "http://127.0.0.1:1236"
+    val QWEN_HOSTS = listOf(
+        "http://127.0.0.1:1236",
+        "http://win.tail976197.ts.net:1236"
+    )
 
     data class AgnesSite(val key: String, val base: String, val tokens: List<String>)
     data class OmniHost(val name: String, val base: String, val token: String)

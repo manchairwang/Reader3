@@ -7,6 +7,7 @@ import android.util.LruCache
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import io.legado.app.help.book.BookHelp
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.http.postJson
 import io.legado.app.constant.AppLog
@@ -62,53 +63,60 @@ object PicGenManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        //tailscale 网关探活循环：启动即探活一轮，之后每 10 分钟检测；可达则自动启用渠道
+        //全渠道探活循环：启动即探活一轮，之后每 10 分钟检测；可达则自动启用对应渠道（界面上无开关）
         scope.launch {
             while (true) {
-                if (PicGenConfig.tailscaleAutoDetect) {
-                    probeOmniHosts()
-                }
+                probeOmniHosts()
+                refreshSvcModels()
                 kotlinx.coroutines.delay(10 * 60 * 1000L)
             }
         }
     }
 
-    /** 探活 win/cat 网关：GET /v1/models 8s 超时；可达则自动打开对应渠道开关 */
-    private suspend fun probeOmniHosts() {
-        for (host in PicGenChannels.OMNI_HOSTS) {
-            if (host.name == "win-local") continue
-            val reachable = try {
-                withTimeoutOrNull(8_000L) {
-                    val request = Request.Builder().url("${host.base}/v1/models")
-                        .header("Authorization", "Bearer ${host.token}")
-                        .build()
-                    okHttpClient.newCall(request).execute().use { it.isSuccessful }
-                } ?: false
-            } catch (e: Exception) {
-                false
-            }
-            if (host.name == "cat") {
-                PicGenConfig.omniCatReachable = reachable
-            } else {
-                PicGenConfig.omniWinReachable = reachable
-            }
-            //可达则自动启用对应渠道
-            if (reachable) {
-                if (host.name == "cat" && !PicGenConfig.channelOmniCat) {
-                    PicGenConfig.channelOmniCat = true
-                    LogUtils.d(TAG, "tailscale cat 网关可达，自动启用 omni_cat")
-                }
-                if (host.name != "cat" && !PicGenConfig.channelOmniWin) {
-                    PicGenConfig.channelOmniWin = true
-                    LogUtils.d(TAG, "tailscale win 网关可达，自动启用 omni_win")
-                }
-            }
+    /** 探测一个 HTTP 地址：任何响应（含 4xx/5xx）都视为服务存在；连接失败/超时视为不可达 */
+    private suspend fun probeHttp(url: String, token: String?): Boolean {
+        return try {
+            withTimeoutOrNull(8_000L) {
+                val builder = Request.Builder().url(url)
+                if (token != null) builder.header("Authorization", "Bearer $token")
+                okHttpClient.newCall(builder.build()).execute().use { true }
+            } ?: false
+        } catch (e: Exception) {
+            false
         }
     }
 
-    /** 网关可达性判断：localhost 永远视为可达；tailscale host 用探活缓存值 */
+    /**
+     * 全渠道探活：omni win/cat/win-local 网关 + pony/qwen 生图服务（本机、tailscale win 机候选）。
+     * 能用就用，不能用不提示，仅记调试日志。
+     */
+    private suspend fun probeOmniHosts() {
+        var winTs = false
+        var winLocal = false
+        var cat = false
+        for (host in PicGenChannels.OMNI_HOSTS) {
+            val reachable = probeHttp("${host.base}/v1/models", host.token)
+            when (host.name) {
+                "win" -> winTs = reachable
+                "win-local" -> winLocal = reachable
+                "cat" -> cat = reachable
+            }
+        }
+        PicGenConfig.omniWinReachable = winTs || winLocal
+        PicGenConfig.omniCatReachable = cat
+        PicGenConfig.channelOmniWin = winTs || winLocal
+        PicGenConfig.channelOmniCat = cat
+        //pony/qwen：候选地址逐个探活，取首个可达的作为活跃地址
+        ponyActiveBase = PicGenChannels.PONY_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
+        qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
+        PicGenConfig.channelPony = ponyActiveBase != null
+        PicGenConfig.channelQwen = qwenActiveBase != null
+        LogUtils.d(TAG, "渠道探活: omni_win_ts=$winTs omni_win_local=$winLocal omni_cat=$cat " +
+            "pony=$ponyActiveBase qwen=$qwenActiveBase")
+    }
+
+    /** 网关可达性判断：用探活缓存值（win-local 也以本轮探活结果为准） */
     private fun hostReachable(host: PicGenChannels.OmniHost): Boolean {
-        if (host.name == "win-local") return true
         return if (host.name == "cat") PicGenConfig.omniCatReachable
         else PicGenConfig.omniWinReachable
     }
@@ -133,6 +141,113 @@ object PicGenManager {
     private var agnesRR = 0
     @Volatile
     private var omniRR = 0
+
+    //pony/qwen 探活后的活跃地址（null 表示全部不可达）
+    @Volatile
+    private var ponyActiveBase: String? = null
+    @Volatile
+    private var qwenActiveBase: String? = null
+
+    // ---- 服务模型发现：/v1/models → 文生图/摘要模型分组（探活周期刷新，检测按钮即时刷新）----
+    data class SvcModels(val image: List<String>, val chat: List<String>)
+
+    private val svcCache = ConcurrentHashMap<String, SvcModels>()
+
+    //文生图模型名特征 / 非对话模型排除
+    private val IMAGE_MODEL_RE =
+        Regex("(?i)flux|diffusion|sd3|sdxl|stable|image|dall|kolors|cogview|seedream|mirage|irag|sora|janus")
+    private val NON_CHAT_RE =
+        Regex("(?i)embed|rerank|rank|whisper|clip|ocr|guard|moderation|retriev|speech|tts|asr|safety|yolo|detect")
+
+    private fun classifyModels(ids: List<String>): SvcModels {
+        val image = ids.filter { IMAGE_MODEL_RE.containsMatchIn(it) }
+        val chat = ids.filter { !IMAGE_MODEL_RE.containsMatchIn(it) && !NON_CHAT_RE.containsMatchIn(it) }
+        //偏好常见摘要模型排前
+        val prefer = Regex("(?i)instruct|nemotron|llama|qwen|deepseek|sensenova|sensechat|agnes|step|gpt|flash")
+        return SvcModels(image.take(6), chat.sortedByDescending { prefer.containsMatchIn(it) }.take(6))
+    }
+
+    /** GET /v1/models 解析模型 id 列表；失败返回 null */
+    private suspend fun discoverModels(base: String, token: String): List<String>? {
+        return try {
+            val data = withTimeoutOrNull(15_000L) {
+                val builder = Request.Builder().url("$base/v1/models")
+                builder.header("Authorization", "Bearer $token")
+                okHttpClient.newCall(builder.build()).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    resp.body?.string()
+                }
+            } ?: return null
+            val obj = parseJson(data) ?: return null
+            val arr = obj.getAsJsonArray("data") ?: return null
+            arr.mapNotNull { it.asJsonObject?.get("id")?.takeIf { id -> !id.isJsonNull }?.asString }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+    }
+
+    /** 某站可用模型组（缓存优先，缓存为空则现场发现一次） */
+    private suspend fun svcModels(siteKey: String, base: String, token: String): SvcModels? {
+        svcCache[siteKey]?.let { return it }
+        val models = discoverModels(base, token)?.let { classifyModels(it) }
+        if (models != null) svcCache[siteKey] = models
+        return models
+    }
+
+    /** 探活周期刷新所有用户服务的模型清单（agnes 内置 key；sensenova/nim 用户 key） */
+    private suspend fun refreshSvcModels() {
+        val targets = ArrayList<Triple<String, String, String>>() //siteKey, base, token
+        for (site in PicGenChannels.AGNES_SITES) {
+            site.tokens.firstOrNull()?.let { targets.add(Triple(site.key, site.base, it)) }
+        }
+        for (site in PicGenChannels.SENSENOVA_SITES) {
+            val tk = userKeys(if (site.key == "sensenova_cn") PicGenConfig.sensenovaKeysCn else PicGenConfig.sensenovaKeysCom)
+                .firstOrNull()
+            if (tk != null) targets.add(Triple(site.key, site.base, tk))
+        }
+        userKeys(PicGenConfig.nimKeys).firstOrNull()?.let {
+            targets.add(Triple(PicGenChannels.NIM_SITE.key, PicGenChannels.NIM_SITE.base, it))
+        }
+        targets.map { (k, b, t) ->
+            scope.async {
+                discoverModels(b, t)?.let { svcCache[k] = classifyModels(it) }
+            }
+        }.forEach { it.join() }
+    }
+
+    /** 用户多行 key 拆分 */
+    private fun userKeys(text: String): List<String> =
+        text.split('\n', ',').map { it.trim() }.filter { it.length > 8 }
+
+    /** key 管理对话框检测：模型发现 + 摘要模型实测，返回结果描述 */
+    suspend fun testService(siteKey: String, token: String): String {
+        val (base, fallbackChat) = when (siteKey) {
+            "agnes_cn" -> PicGenChannels.AGNES_SITES.first { it.key == "agnes_cn" }.base to PicGenChannels.AGNES_CHAT_MODELS
+            "agnes_com" -> PicGenChannels.AGNES_SITES.first { it.key == "agnes_com" }.base to PicGenChannels.AGNES_CHAT_MODELS
+            "sensenova_cn" -> PicGenChannels.SENSENOVA_SITES.first { it.key == "sensenova_cn" }.base to PicGenChannels.SENSENOVA_CHAT_MODELS
+            "sensenova_com" -> PicGenChannels.SENSENOVA_SITES.first { it.key == "sensenova_com" }.base to PicGenChannels.SENSENOVA_CHAT_MODELS
+            else -> PicGenChannels.NIM_SITE.base to PicGenChannels.NIM_CHAT_MODELS
+        }
+        return try {
+            val t0 = System.currentTimeMillis()
+            val svc = discoverModels(base, token)?.let { classifyModels(it) }
+            if (svc != null) svcCache[siteKey] = svc
+            val ms = System.currentTimeMillis() - t0
+            if (svc == null) {
+                "$siteKey: ✗ /v1/models 不可达"
+            } else {
+                val imgStr = svc.image.take(2).joinToString("/").ifEmpty { "无" }
+                val chatModels = svc.chat.ifEmpty { fallbackChat }
+                val chatRes = testChat(base, token, chatModels.first())
+                "$siteKey: ✓ ${ms}ms · 文生图${svc.image.size}个[$imgStr…] " +
+                    "摘要${svc.chat.size}个[${chatModels.take(2).joinToString("/")}] · 摘要实测 ${chatRes ?: "✓"}"
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            "$siteKey: ✗ ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
 
     /** 结果回调：cacheKey -> bitmap */
     @Volatile
@@ -248,7 +363,7 @@ object PicGenManager {
         val job = scope.launch {
             try {
                 status(cacheKey, "生成提示词…")
-                val prompt = applyStyle(buildPrompt(pageText))
+                val prompt = buildPrompt(pageText)
                 status(cacheKey, "生成图片…")
                 val t0 = System.currentTimeMillis()
                 val (bytes, source) = generateImage(prompt)
@@ -263,10 +378,12 @@ object PicGenManager {
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
-                    val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道开关: " +
+                    val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道: " +
                         "agnes_cn=${PicGenConfig.channelAgnesCn} agnes_com=${PicGenConfig.channelAgnesCom} " +
                         "omni_win=${PicGenConfig.channelOmniWin} omni_cat=${PicGenConfig.channelOmniCat} " +
-                        "pony=${PicGenConfig.channelPony} qwen=${PicGenConfig.channelQwen}"
+                        "pony=${PicGenConfig.channelPony} qwen=${PicGenConfig.channelQwen} " +
+                        "sensenova_keys=${userKeys(PicGenConfig.sensenovaKeysCn).size + userKeys(PicGenConfig.sensenovaKeysCom).size} " +
+                        "nim_keys=${userKeys(PicGenConfig.nimKeys).size}"
                     LogUtils.d(TAG, "gen fail: ${e.message}")
                     AppLog.putNotSave(detail, e)
                     withContext(Dispatchers.Main) {
@@ -280,24 +397,86 @@ object PicGenManager {
         jobs[cacheKey] = job
     }
 
-    /** 提示词：LLM 竞速可用走 TAGS，全挂/关闭走本地正则兜底 */
+    /**
+     * 提示词三段聚合（去重）：
+     * ① 本页所在章 ±1 三章全文 → LLM 摘要词（几十个，按章缓存）
+     * ② 本页文字：少于 100 汉字且少于 200 英文字符 → 本页全文分句作关键词；否则 LLM 摘要（关闭/失败→本地正则兜底）
+     * ③ 已选生图风格 → 风格英文关键词组；未选则空缺
+     */
     private suspend fun buildPrompt(pageText: String): String {
-        if (!PicGenConfig.llmEnable) {
-            return PromptBuilder.buildFallbackPrompt(pageText)
+        val parts = ArrayList<String>()
+        if (PicGenConfig.llmEnable) {
+            chapterKeywords()?.let { parts.add(it) }
         }
-        val summary = chatRace(pageText)
-        return summary ?: PromptBuilder.buildFallbackPrompt(pageText)
+        if (isShortPage(pageText)) {
+            val frags = pageFragments(pageText).take(12)
+            if (frags.isNotEmpty()) parts.add(frags.joinToString(", "))
+        } else if (PicGenConfig.llmEnable) {
+            parts.add(chatRace(PromptBuilder.buildSummaryPrompt(pageText)) ?: PromptBuilder.buildFallbackPrompt(pageText))
+        } else {
+            parts.add(PromptBuilder.buildFallbackPrompt(pageText))
+        }
+        PicStyleConfig.promptFor(ReadBook.book)?.let { parts.add(it) }
+        return mergeKeywords(parts)
     }
 
-    /** 追加当前书选中的生图风格提示词（未选则原样返回） */
-    private fun applyStyle(prompt: String): String {
-        val style = PicStyleConfig.promptFor(ReadBook.book) ?: return prompt
-        return "$prompt. $style"
+    //① 三章摘要词缓存：章号 → 关键词串
+    private val chapterKwMutex = Mutex()
+    @Volatile
+    private var chapterKwCache: Pair<Int, String>? = null
+
+    private suspend fun chapterKeywords(): String? = chapterKwMutex.withLock {
+        val book = ReadBook.book ?: return@withLock null
+        val idx = ReadBook.durChapterIndex
+        chapterKwCache?.takeIf { it.first == idx }?.let { return@withLock it.second.ifBlank { null } }
+        val chapters = book.chapters
+        if (chapters.isNullOrEmpty()) return@withLock null
+        val sb = StringBuilder()
+        for (i in (idx - 1)..(idx + 1)) {
+            chapters.getOrNull(i)?.let { ch ->
+                try {
+                    BookHelp.getContent(book, ch)?.let { sb.append(it).append('\n') }
+                } catch (e: Exception) {
+                    LogUtils.d(TAG, "chapter content fail: ${e.message}")
+                }
+            }
+        }
+        if (sb.isBlank()) return@withLock null
+        val kw = chatRace(PromptBuilder.buildChapterPrompt(sb.toString())) ?: ""
+        chapterKwCache = idx to kw
+        kw.ifBlank { null }
     }
 
-    // ---- TAGS LLM 竞速：omni 优先 combo × 双机 + agnes 文本模型，最先成功赢 ----
-    private suspend fun chatRace(pageText: String): String? {
-        val prompt = PromptBuilder.buildSummaryPrompt(pageText)
+    /** 本页文字是否过少：少于 100 个汉字且少于 200 个其他字符 */
+    private fun isShortPage(text: String): Boolean {
+        val cjk = Regex("[\\u4e00-\\u9fff]").findAll(text).count()
+        return cjk < 100 && text.length - cjk < 200
+    }
+
+    /** 本页全文分句作关键词：按标点切分，保留 2-40 字片段 */
+    private fun pageFragments(text: String): List<String> =
+        text.replace(Regex("\\s+"), " ")
+            .split(Regex("[。！？；：…!?;:，、,\\n]+"))
+            .map { it.trim() }
+            .filter { it.length in 2..40 }
+            .distinct()
+
+    /** 多段关键词聚合：拆逗号 → trim → 忽略大小写去重 → 截 90 个 */
+    private fun mergeKeywords(parts: List<String>): String {
+        val seen = HashSet<String>()
+        val out = ArrayList<String>()
+        for (p in parts) {
+            for (tok in p.split(Regex("[,，;；\\n]+"))) {
+                val t = tok.trim()
+                if (t.isEmpty()) continue
+                if (seen.add(t.lowercase())) out.add(t)
+            }
+        }
+        return out.take(90).joinToString(", ")
+    }
+
+    // ---- TAGS LLM 竞速：omni 优先 combo × 双机 + agnes/sensenova/NIM 文本模型，最先成功赢 ----
+    private suspend fun chatRace(prompt: String): String? {
         val tasks = ArrayList<suspend () -> String?>()
         //omni 网关（探活判定不可达的直接跳过，避免长超时等待）
         for (host in PicGenChannels.OMNI_HOSTS) {
@@ -307,13 +486,34 @@ object PicGenManager {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
         }
-        //agnes 文本模型兜底
+        //agnes 文本模型（内置 key × 发现/兜底模型）
         for (site in PicGenChannels.AGNES_SITES) {
             val chOn = if (site.key == "agnes_cn") PicGenConfig.channelAgnesCn else PicGenConfig.channelAgnesCom
             if (!chOn) continue
             val tk = site.tokens.firstOrNull() ?: continue
-            for (m in PicGenChannels.AGNES_CHAT_MODELS) {
+            val models = svcModels(site.key, site.base, tk)?.chat?.takeIf { it.isNotEmpty() }
+                ?: PicGenChannels.AGNES_CHAT_MODELS
+            for (m in models.take(3)) {
                 tasks.add { chatOnce(site.base, tk, m, prompt) }
+            }
+        }
+        //SenseNova 文本模型：用户 key × 发现/兜底模型
+        for (site in PicGenChannels.SENSENOVA_SITES) {
+            val custom = if (site.key == "sensenova_cn") PicGenConfig.sensenovaKeysCn else PicGenConfig.sensenovaKeysCom
+            val tk = userKeys(custom).firstOrNull() ?: continue
+            val models = svcModels(site.key, site.base, tk)?.chat?.takeIf { it.isNotEmpty() }
+                ?: PicGenChannels.SENSENOVA_CHAT_MODELS
+            for (m in models.take(3)) {
+                tasks.add { chatOnce(site.base, tk, m, prompt) }
+            }
+        }
+        //Nvidia NIM 文本模型：用户 key × 发现/兜底模型
+        userKeys(PicGenConfig.nimKeys).firstOrNull()?.let { tk ->
+            val base = PicGenChannels.NIM_SITE.base
+            val models = svcModels(PicGenChannels.NIM_SITE.key, base, tk)?.chat?.takeIf { it.isNotEmpty() }
+                ?: PicGenChannels.NIM_CHAT_MODELS
+            for (m in models.take(3)) {
+                tasks.add { chatOnce(base, tk, m, prompt) }
             }
         }
         if (tasks.isEmpty()) return null
@@ -347,7 +547,34 @@ object PicGenManager {
         }
     }
 
-    // ---- 生图：agnes 与 omni 双族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
+    /**
+     * key 测试（key 管理对话框用）：发一次极小 chat 请求。
+     * 返回 null 表示成功（含耗时描述），否则为错误信息。
+     */
+    suspend fun testChat(base: String, token: String, model: String): String? {
+        return try {
+            val body = gson.toJson(
+                mapOf(
+                    "model" to model,
+                    "messages" to listOf(mapOf("role" to "user", "content" to "hi")),
+                    "max_tokens" to 8
+                )
+            )
+            val t0 = System.currentTimeMillis()
+            val data = withTimeoutOrNull(CHAT_TIMEOUT_MS) {
+                postJsonRequest("$base/v1/chat/completions", body, token)
+            } ?: return "超时"
+            val obj = parseJson(data) ?: return "响应解析失败"
+            val text = obj.getAsJsonArray("choices")?.get(0)?.asJsonObject
+                ?.getAsJsonObject("message")?.get("content")?.asString
+            if (text.isNullOrEmpty()) "空响应" else "✓ ${System.currentTimeMillis() - t0}ms"
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            e.message ?: e.javaClass.simpleName
+        }
+    }
+
+    // ---- 生图：agnes/sensenova/NIM/omni 多族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
         //agnes 族
@@ -358,18 +585,65 @@ object PicGenManager {
         if (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) {
             families.add { imageOmniroute(prompt) }
         }
-        //本地族
+        //NIM 族：填了 key 即参与
+        if (userKeys(PicGenConfig.nimKeys).isNotEmpty()) {
+            families.add { imageNim(prompt) }
+        }
+        //SenseNova 族：发现到文生图模型才参与
+        if (userKeys(PicGenConfig.sensenovaKeysCn).isNotEmpty() ||
+            userKeys(PicGenConfig.sensenovaKeysCom).isNotEmpty()
+        ) {
+            families.add { imageSensenova(prompt) }
+        }
+        //本地族：后台探活可达才参与（本机或 tailscale win 机）
         if (PicGenConfig.channelPony) {
-            families.add { localTxt2Img(PicGenChannels.PONY_BASE, PromptBuilder.buildPonyPrompt(prompt))?.let { it to "pony@local" } }
+            ponyActiveBase?.let { base ->
+                families.add { localTxt2Img(base, PromptBuilder.buildPonyPrompt(prompt))?.let { it to "pony@local" } }
+            }
         }
         if (PicGenConfig.channelQwen) {
-            families.add { localTxt2Img(PicGenChannels.QWEN_BASE, prompt.take(900))?.let { it to "qwen@local" } }
+            qwenActiveBase?.let { base ->
+                families.add { localTxt2Img(base, prompt.take(900))?.let { it to "qwen@local" } }
+            }
         }
         if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
         val result = raceFirst(families.map { scope.async { it() } }) { it != null }
         @Suppress("UNCHECKED_CAST")
         return result as? Pair<ByteArray, String>
             ?: throw IllegalStateException("全部生图渠道失败")
+    }
+
+    //轮换计数器：NIM 组合起点
+    @Volatile
+    private var nimRR = 0
+    @Volatile
+    private var snRR = 0
+
+    /** 通用 OpenAI 兼容生图：/v1/images/generations，b64_json 或 url 或 NIM artifacts */
+    private suspend fun imageOpenai(base: String, token: String, model: String, prompt: String): Pair<ByteArray, String>? {
+        val rkey = "img:$base:${token.takeLast(8)}:$model"
+        if (!routeAvailable(rkey)) return null
+        return try {
+            val body = gson.toJson(
+                mapOf(
+                    "model" to model,
+                    "prompt" to prompt.take(900),
+                    "n" to 1,
+                    "size" to dynamicSizePx,
+                    "response_format" to "b64_json"
+                )
+            )
+            val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
+                postJsonRequest("$base/v1/images/generations", body, token)
+            } ?: return null
+            val item = parseImageResponse(data) ?: return null
+            recordSuccess(rkey)
+            item.first to model
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            recordFailure(rkey)
+            null
+        }
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
@@ -381,49 +655,71 @@ object PicGenManager {
         }
         //用户自定义 agnes key：cn/com 两个输入框各自多行，分别加入对应站竞速
         for (site in PicGenChannels.AGNES_SITES) {
-            val custom = if (site.key == "agnes_cn") {
-                PicGenConfig.agnesKeysCn
-            } else {
-                PicGenConfig.agnesKeysCom
-            }
-            custom.split('\n', ',')
-                .map { it.trim() }
-                .filter { it.length > 8 }
-                .forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
+            val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
+            userKeys(custom).forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
         }
         if (combos.isEmpty()) return null
-        //一波并发：所有未冷却的 token 各发一个请求，最先出图赢
+        //一波并发：所有未冷却的 token 各发一个请求，最先出图赢；模型用发现的文生图模型，无则兜底表
         val tasks = combos.mapIndexed { ti, (base, tk, siteKey) ->
-            val model = PicGenChannels.AGNES_IMAGE_MODELS[(ti + agnesRR) % PicGenChannels.AGNES_IMAGE_MODELS.size]
+            val svcKey = if (siteKey == "agnes_user") null else siteKey
+            val models = svcKey?.let { svcModels(it, base, tk)?.image?.takeIf { im -> im.isNotEmpty() } }
+                ?: PicGenChannels.AGNES_IMAGE_MODELS
+            val model = models[(ti + agnesRR) % models.size]
             scope.async {
-                val rkey = "agnes:$base:${tk.takeLast(8)}:$model"
-                if (!routeAvailable(rkey)) return@async null
-                try {
-                    val body = gson.toJson(
-                        mapOf(
-                            "model" to model,
-                            "prompt" to prompt.take(900),
-                            "n" to 1,
-                            "size" to dynamicSizePx,
-                            "response_format" to "b64_json"
-                        )
-                    )
-                    val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
-                        postJsonRequest("$base/v1/images/generations", body, tk)
-                    } ?: return@async null
-                    val item = parseImageResponse(data) ?: return@async null
-                    recordSuccess(rkey)
-                    item.first to "${model}@${siteKey}"
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    recordFailure(rkey)
-                    null
-                }
+                imageOpenai(base, tk, model, prompt)?.let { (bytes, m) -> bytes to "${m}@${siteKey}" }
             }
         }
         agnesRR++
         @Suppress("UNCHECKED_CAST")
         return raceFirst(tasks) { it != null } as? Pair<ByteArray, String>
+    }
+
+    /** NIM 生图：用户 key × 发现/兜底模型，一波最多 6 个组合竞速 */
+    private suspend fun imageNim(prompt: String): Pair<ByteArray, String>? {
+        val keys = userKeys(PicGenConfig.nimKeys)
+        if (keys.isEmpty()) return null
+        val base = PicGenChannels.NIM_SITE.base
+        val models = svcModels(PicGenChannels.NIM_SITE.key, base, keys.first())?.image?.takeIf { it.isNotEmpty() }
+            ?: PicGenChannels.NIM_IMAGE_MODELS
+        val combos = ArrayList<Pair<String, String>>() //model, token
+        keys.forEach { tk -> models.forEach { m -> combos.add(m to tk) } }
+        if (combos.isEmpty()) return null
+        val off = nimRR % combos.size
+        nimRR++
+        val tasks = (0 until minOf(6, combos.size)).map { i ->
+            val (model, tk) = combos[(off + i) % combos.size]
+            scope.async {
+                imageOpenai(base, tk, model, prompt)?.let { (bytes, m) -> bytes to "${m}@nim" }
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return raceFirst(tasks) { it != null } as? Pair<ByteArray, String>
+    }
+
+    /** SenseNova 生图：仅在 /v1/models 发现到文生图模型时参与 */
+    private suspend fun imageSensenova(prompt: String): Pair<ByteArray, String>? {
+        val tasks = ArrayList<suspend () -> Pair<ByteArray, String>?>()
+        for (site in PicGenChannels.SENSENOVA_SITES) {
+            val custom = if (site.key == "sensenova_cn") PicGenConfig.sensenovaKeysCn else PicGenConfig.sensenovaKeysCom
+            val keys = userKeys(custom)
+            if (keys.isEmpty()) continue
+            val svc = svcCache[site.key]
+            val models = svc?.image?.takeIf { it.isNotEmpty() } ?: continue
+            val base = site.base
+            val off = snRR % models.size
+            snRR++
+            keys.take(2).forEach { tk ->
+                (0 until minOf(2, models.size)).forEach { i ->
+                    val model = models[(off + i) % models.size]
+                    tasks.add {
+                        imageOpenai(base, tk, model, prompt)?.let { (bytes, m) -> bytes to "${m}@${site.key}" }
+                    }
+                }
+            }
+        }
+        if (tasks.isEmpty()) return null
+        @Suppress("UNCHECKED_CAST")
+        return raceFirst(tasks.map { scope.async { it() } }) { it != null } as? Pair<ByteArray, String>
     }
 
     private suspend fun imageOmniroute(prompt: String): Pair<ByteArray, String>? {
@@ -546,19 +842,26 @@ object PicGenManager {
         }
     }
 
-    /** 解析生图响应：b64_json 或 url 双格式 */
+    /** 解析生图响应：b64_json / url / NIM artifacts 三格式 */
     private suspend fun parseImageResponse(data: String): Pair<ByteArray, Unit>? {
         val obj = parseJson(data) ?: return null
-        val arr = obj.getAsJsonArray("data") ?: return null
-        if (arr.size() == 0) return null
-        val item = arr[0].asJsonObject
-        val b64 = item.get("b64_json")?.takeIf { !it.isJsonNull }?.asString
-        if (!b64.isNullOrEmpty()) {
-            return decodeB64(b64) to Unit
+        val arr = obj.getAsJsonArray("data")
+        if (arr != null && arr.size() > 0) {
+            val item = arr[0].asJsonObject
+            val b64 = item.get("b64_json")?.takeIf { !it.isJsonNull }?.asString
+            if (!b64.isNullOrEmpty()) {
+                return decodeB64(b64) to Unit
+            }
+            val url = item.get("url")?.takeIf { !it.isJsonNull }?.asString
+            if (!url.isNullOrEmpty()) {
+                return fetchBytes(url) to Unit
+            }
         }
-        val url = item.get("url")?.takeIf { !it.isJsonNull }?.asString
-        if (!url.isNullOrEmpty()) {
-            return fetchBytes(url) to Unit
+        //NIM 原生格式：{"artifacts":[{"base64":"…"}]}
+        val arts = obj.getAsJsonArray("artifacts")
+        if (arts != null && arts.size() > 0) {
+            val b64 = arts[0].asJsonObject?.get("base64")?.takeIf { !it.isJsonNull }?.asString
+            if (!b64.isNullOrEmpty()) return decodeB64(b64) to Unit
         }
         return null
     }

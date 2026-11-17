@@ -52,23 +52,16 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
         get() = if (contains(PreferKey.picGenChannelOmniCat)) getBoolean(PreferKey.picGenChannelOmniCat) else true
         set(value) = putBoolean(PreferKey.picGenChannelOmniCat, value)
 
-    var channelPony: Boolean
-        get() = getBoolean(PreferKey.picGenChannelPony)
-        set(value) = putBoolean(PreferKey.picGenChannelPony, value)
-
-    var channelQwen: Boolean
-        get() = getBoolean(PreferKey.picGenChannelQwen)
-        set(value) = putBoolean(PreferKey.picGenChannelQwen, value)
+    //pony/qwen 生图：后台探活自动启用（不持久化、不在界面显示）
+    @Volatile
+    var channelPony: Boolean = false
+    @Volatile
+    var channelQwen: Boolean = false
 
     //提示词 LLM 竞速开关（关闭则直接本地正则兜底）
     var llmEnable: Boolean
         get() = if (contains(PreferKey.picGenLlmEnable)) getBoolean(PreferKey.picGenLlmEnable) else true
         set(value) = putBoolean(PreferKey.picGenLlmEnable, value)
-
-    //tailscale 自动检测开关：每 10 分钟探活 win/cat 网关，可达则自动启用对应渠道
-    var tailscaleAutoDetect: Boolean
-        get() = if (contains("picGenTailscaleAutoDetect")) getBoolean("picGenTailscaleAutoDetect") else true
-        set(value) = putBoolean("picGenTailscaleAutoDetect", value)
 
     //用户自定义 agnes key：cn / com 各自多行文本（每行一个 key），分别加入对应站竞速
     var agnesKeysCn: String
@@ -78,6 +71,20 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
     var agnesKeysCom: String
         get() = getString("picGenAgnesKeysCom", null) ?: ""
         set(value) = putString("picGenAgnesKeysCom", value)
+
+    //用户自定义 SenseNova key：cn（api.sensenova.cn）/ com（api.sensenova.ai）各自多行文本，加入摘要 LLM 竞速
+    var sensenovaKeysCn: String
+        get() = getString("picGenSensenovaKeysCn", null) ?: ""
+        set(value) = putString("picGenSensenovaKeysCn", value)
+
+    var sensenovaKeysCom: String
+        get() = getString("picGenSensenovaKeysCom", null) ?: ""
+        set(value) = putString("picGenSensenovaKeysCom", value)
+
+    //用户自定义 Nvidia NIM key：多行文本（每行一个 nvapi-…），加入摘要 LLM 与生图竞速
+    var nimKeys: String
+        get() = getString("picGenNimKeys", null) ?: ""
+        set(value) = putString("picGenNimKeys", value)
 
     //运行时缓存：tailscale 网关可达状态（不持久化，每 10 分钟刷新）
     @Volatile

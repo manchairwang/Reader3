@@ -194,7 +194,5 @@ object PreferKey {
     const val picGenChannelAgnesCom = "picGenChannelAgnesCom"
     const val picGenChannelOmniWin = "picGenChannelOmniWin"
     const val picGenChannelOmniCat = "picGenChannelOmniCat"
-    const val picGenChannelPony = "picGenChannelPony"
-    const val picGenChannelQwen = "picGenChannelQwen"
     const val picGenLlmEnable = "picGenLlmEnable"
 }
