@@ -8,6 +8,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.legado.app.help.book.BookHelp
+import io.legado.app.data.appDb
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.http.postJson
 import io.legado.app.constant.AppLog
@@ -429,16 +430,20 @@ object PicGenManager {
         val book = ReadBook.book ?: return@withLock null
         val idx = ReadBook.durChapterIndex
         chapterKwCache?.takeIf { it.first == idx }?.let { return@withLock it.second.ifBlank { null } }
-        val chapters = book.chapters
-        if (chapters.isNullOrEmpty()) return@withLock null
+        val chapters = withContext(Dispatchers.IO) {
+            try {
+                appDb.bookChapterDao.getChapterList(book.bookUrl, (idx - 1).coerceAtLeast(0), idx + 1)
+            } catch (e: Exception) {
+                LogUtils.d(TAG, "chapter list fail: ${e.message}")
+                null
+            }
+        } ?: return@withLock null
         val sb = StringBuilder()
-        for (i in (idx - 1)..(idx + 1)) {
-            chapters.getOrNull(i)?.let { ch ->
-                try {
-                    BookHelp.getContent(book, ch)?.let { sb.append(it).append('\n') }
-                } catch (e: Exception) {
-                    LogUtils.d(TAG, "chapter content fail: ${e.message}")
-                }
+        for (ch in chapters) {
+            try {
+                BookHelp.getContent(book, ch)?.let { sb.append(it).append('\n') }
+            } catch (e: Exception) {
+                LogUtils.d(TAG, "chapter content fail: ${e.message}")
             }
         }
         if (sb.isBlank()) return@withLock null
