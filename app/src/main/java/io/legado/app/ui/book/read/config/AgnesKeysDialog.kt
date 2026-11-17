@@ -13,7 +13,9 @@ import io.legado.app.help.picgen.PicGenChannels
 import io.legado.app.help.picgen.PicGenConfig
 import io.legado.app.help.picgen.PicGenManager
 import io.legado.app.utils.setLayout
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * key 管理（3 个服务 5 个输入框）：
@@ -24,8 +26,6 @@ import kotlinx.coroutines.launch
  * 确定=保存关闭；取消=放弃关闭。检测会即时刷新模型发现缓存。
  */
 class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
-
-    private var saveOnDismiss = false
 
     override fun onStart() {
         super.onStart()
@@ -52,13 +52,24 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
         view.findViewById<EditText>(R.id.et_nim_keys)
             .setText(PicGenConfig.nimKeys)
         view.findViewById<View>(R.id.tv_ok).setOnClickListener {
-            saveOnDismiss = true
+            //view 销毁前立即保存（onDismiss 时 view 已为 null，保存不会生效）
+            save()
             dismissAllowingStateLoss()
         }
         view.findViewById<View>(R.id.tv_cancel).setOnClickListener {
             dismissAllowingStateLoss()
         }
         view.findViewById<View>(R.id.tv_test).setOnClickListener { testAll() }
+    }
+
+    /** 把 5 个输入框内容写回配置 */
+    private fun save() {
+        val v = view ?: return
+        PicGenConfig.agnesKeysCn = v.findViewById<EditText>(R.id.et_agnes_keys_cn).text.toString().trim()
+        PicGenConfig.agnesKeysCom = v.findViewById<EditText>(R.id.et_agnes_keys_com).text.toString().trim()
+        PicGenConfig.sensenovaKeysCn = v.findViewById<EditText>(R.id.et_sensenova_keys_cn).text.toString().trim()
+        PicGenConfig.sensenovaKeysCom = v.findViewById<EditText>(R.id.et_sensenova_keys_com).text.toString().trim()
+        PicGenConfig.nimKeys = v.findViewById<EditText>(R.id.et_nim_keys).text.toString().trim()
     }
 
     private fun etText(id: Int): String? =
@@ -92,12 +103,14 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
         }
         var pending = targets.size
         targets.forEach { (siteKey, tk) ->
-            lifecycleScope.launch {
+            viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
                 val line = PicGenManager.testService(siteKey, tk)
-                appendResult(line)
-                pending--
-                if (pending <= 0) {
-                    tvBtn.text = getString(R.string.keys_test)
+                withContext(Dispatchers.Main) {
+                    appendResult(line)
+                    pending--
+                    if (pending <= 0) {
+                        tvBtn.text = getString(R.string.keys_test)
+                    }
                 }
             }
         }
@@ -110,21 +123,7 @@ class AgnesKeysDialog : BaseDialogFragment(R.layout.dialog_agnes_keys) {
 
     override fun onDismiss(dialog: DialogInterface) {
         super.onDismiss(dialog)
-        if (!saveOnDismiss) return
-        view?.findViewById<EditText>(R.id.et_agnes_keys_cn)?.let {
-            PicGenConfig.agnesKeysCn = it.text.toString().trim()
-        }
-        view?.findViewById<EditText>(R.id.et_agnes_keys_com)?.let {
-            PicGenConfig.agnesKeysCom = it.text.toString().trim()
-        }
-        view?.findViewById<EditText>(R.id.et_sensenova_keys_cn)?.let {
-            PicGenConfig.sensenovaKeysCn = it.text.toString().trim()
-        }
-        view?.findViewById<EditText>(R.id.et_sensenova_keys_com)?.let {
-            PicGenConfig.sensenovaKeysCom = it.text.toString().trim()
-        }
-        view?.findViewById<EditText>(R.id.et_nim_keys)?.let {
-            PicGenConfig.nimKeys = it.text.toString().trim()
-        }
+        //兜底：万一没走「确定」按钮（如返回键关闭），view 尚存时也保存一次
+        if (view != null) save()
     }
 }
