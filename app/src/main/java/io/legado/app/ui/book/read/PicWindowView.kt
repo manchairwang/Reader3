@@ -166,17 +166,22 @@ class PicWindowView @JvmOverloads constructor(
     }
 
     //加载中：保留旧图，仅叠转圈，避免黑底闪烁
+    //注意：triggerPicGen 可能从协程(非主线程)触发，动画 start/cancel 必须切主线程
     fun showLoading() {
-        ivLoading.visibility = VISIBLE
-        loadingAnimator.start()
-        tvStatus.visibility = GONE
+        post {
+            ivLoading.visibility = VISIBLE
+            if (!loadingAnimator.isRunning) loadingAnimator.start()
+            tvStatus.visibility = GONE
+        }
     }
 
     fun showError(msg: String) {
         stopLoading()
-        ivPic.visibility = GONE
-        tvStatus.visibility = VISIBLE
-        tvStatus.text = msg
+        post {
+            ivPic.visibility = GONE
+            tvStatus.visibility = VISIBLE
+            tvStatus.text = msg
+        }
     }
 
     fun showStatus(msg: String) {
@@ -185,25 +190,33 @@ class PicWindowView @JvmOverloads constructor(
         if (ivPic.visibility != VISIBLE) {
             //失败时停转圈：否则一直转个不停（用户看到"没有进展"）
             if (msg.startsWith("失败")) stopLoading() else {
-                ivLoading.visibility = VISIBLE
-                loadingAnimator.start()
+                post {
+                    ivLoading.visibility = VISIBLE
+                    if (!loadingAnimator.isRunning) loadingAnimator.start()
+                }
             }
-            tvStatus.visibility = VISIBLE
-            tvStatus.text = msg
+            post {
+                tvStatus.visibility = VISIBLE
+                tvStatus.text = msg
+            }
         }
     }
 
     fun clear() {
         ivPic.setImageDrawable(null)
-        ivPic.visibility = GONE
+        post {
+            ivPic.visibility = GONE
+            tvStatus.visibility = GONE
+        }
         stopLoading()
-        tvStatus.visibility = GONE
     }
 
     fun hasImage(): Boolean = ivPic.visibility == VISIBLE
 
     private fun stopLoading() {
-        ivLoading.visibility = GONE
-        loadingAnimator.cancel()
+        post {
+            ivLoading.visibility = GONE
+            loadingAnimator.cancel()
+        }
     }
 }
