@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="ring"
-    android:innerRadius="12dp"
-    android:thickness="3dp"
-    android:useLevel="false">
+<!--270° 缺口弧环：旋转时缺口位置移动，肉眼可见"在转"。完整圆环旋转无视觉变化 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="40dp"
+    android:height="40dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
 
-    <stroke
-        android:width="3dp"
-        android:color="#BFFFFFFF" />
-
-</shape>
+    <path
+        android:pathData="M12,2 A10,10 0 1 1 12,22"
+        android:strokeColor="#E6FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

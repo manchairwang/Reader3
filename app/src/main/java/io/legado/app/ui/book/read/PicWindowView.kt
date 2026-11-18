@@ -102,10 +102,10 @@ class PicWindowView @JvmOverloads constructor(
                 context.sendToClip(text)
             }
         }
-        //加载转圈：自绘环形匀速旋转。系统 progressBarStyle 在部分 ROM 渲染成
-        //1/4 弧段闪烁且不转（用户反馈"一直 1/4 段、没有进展"），故代码动画代替
+        //加载转圈：270° 缺口弧环缓慢匀速旋转（缺口移动肉眼可见"在转"）。
+        //系统 progressBarStyle 在部分 ROM 渲染成 1/4 弧段闪烁且不转，故代码动画代替
         loadingAnimator = ObjectAnimator.ofFloat(ivLoading, View.ROTATION, 0f, 360f).apply {
-            duration = 900L
+            duration = 1500L
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
         }
