@@ -107,6 +107,7 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
     private fun initData() {
         binding.cbShareLayout.isChecked = ReadBookConfig.shareLayout
         binding.cbPicWindow.isChecked = PicGenConfig.windowShow
+        binding.cbPicWindowShowInfo.isChecked = PicGenConfig.showInfo
         upView()
         styleAdapter.setItems(ReadBookConfig.configList)
     }
@@ -114,6 +115,10 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
     private fun initViewEvent() = binding.run {
         cbPicWindow.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.windowShow = isChecked
+            (activity as? ReadBookActivity)?.onPicConfigChanged()
+        }
+        cbPicWindowShowInfo.onCheckedChangeListener = { _, isChecked ->
+            PicGenConfig.showInfo = isChecked
             (activity as? ReadBookActivity)?.onPicConfigChanged()
         }
         chineseConverter.onChanged {

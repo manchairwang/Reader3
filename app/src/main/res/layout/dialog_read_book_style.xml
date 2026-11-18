@@ -137,21 +137,46 @@
         android:layout_marginHorizontal="16dp"
         android:layout_marginTop="8dp"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
 
         <TextView
             android:id="@+id/tv_pic_window_label"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:alpha="0.75"
             android:text="@string/pic_window_show"
-            android:textSize="12sp" />
+            android:textSize="18sp" />
 
         <io.legado.app.ui.widget.checkbox.SmoothCheckBox
             android:id="@+id/cb_pic_window"
-            android:layout_width="20dp"
-            android:layout_height="20dp" />
+            android:layout_width="30dp"
+            android:layout_height="30dp" />
+
+    </LinearLayout>
+
+    <!--图片上显示提示词和来源：主开关下方-->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/pic_window_show_info"
+            android:textSize="16sp" />
+
+        <io.legado.app.ui.widget.checkbox.SmoothCheckBox
+            android:id="@+id/cb_pic_window_show_info"
+            android:layout_width="30dp"
+            android:layout_height="30dp" />
 
     </LinearLayout>
 
