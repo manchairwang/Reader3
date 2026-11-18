@@ -990,31 +990,45 @@ function selectElements(root, rule, baseUrl) {
   return cur;
 }
 function selectStep(scope, step) {
-  // legado 风格: class.x / tag.a / id.x / text.x + 索引; 或原生 CSS
-  let m = step.match(/^(class|tag|id|text)\.(.+)$/);
-  let css = null, textIdx = -1;
+  const sc = (scope instanceof Document ? scope.documentElement : scope);
+  // legado 关键字前缀: class.x / tag.a / id.x / text.xxx + 索引
+  const m = step.match(/^(class|tag|id|text)\.(.+)$/);
   if (m) {
-    let kind = m[1], rest = m[2];
-    let idx = null, exclude = false;
+    const kind = m[1];
+    let rest = m[2], idx = null, exclude = false;
     const im = rest.match(/^(.*?)(!)?(\d+|-\d+)$/);
     if (im) { rest = im[1]; idx = parseInt(im[3]); exclude = !!im[2] }
-    if (kind === 'class') css = '.' + rest.replace(/\./g, '.');
-    else if (kind === 'tag') css = rest;
-    else if (kind === 'id') css = '#' + rest;
-    else if (kind === 'text') { textIdx = idx; idx = null; }
-    const nodes = css != null
-      ? Array.from((scope instanceof Document ? scope.documentElement : scope).querySelectorAll(css))
-      : Array.from(scope.querySelectorAll('*')).filter(e =>
-          e.children.length === 0 && (e.textContent || '').trim());
-    if (textIdx != null && textIdx > -1) return [nodes[textIdx]].filter(Boolean);
+    let nodes;
+    if (kind === 'text') {
+      // text.下一页: 文本匹配(精确优先, 兜底包含)
+      nodes = Array.from(sc.querySelectorAll('*')).filter(e =>
+        (e.textContent || '').trim() === rest ||
+        (!e.querySelector('*') && (e.textContent || '').includes(rest)));
+    } else {
+      const css = kind === 'class' ? '[class~="' + CSS.escape(rest) + '"]'
+        : kind === 'id' ? '[id="' + CSS.escape(rest) + '"]'
+        : rest; // tag
+      try { nodes = Array.from(sc.querySelectorAll(css)) } catch { nodes = [] }
+    }
     if (idx != null) {
       if (exclude) { nodes.splice(idx, 1); return nodes }
       return [nodes[idx]].filter(Boolean);
     }
     return nodes;
   }
-  // 原生 CSS 兜底
-  try { return Array.from(scope.querySelectorAll(step)) } catch { return [] }
+  // legado 裸标签语法: ul.1 = 第2个<ul>, a = 所有<a>
+  const toks = step.split('.');
+  if (/^[a-zA-Z][\w-]*$/.test(toks[0])) {
+    let idx = null;
+    const last = toks[toks.length - 1];
+    if (toks.length > 1 && /^\d+$/.test(last)) idx = parseInt(last);
+    let nodes;
+    try { nodes = Array.from(sc.querySelectorAll(toks[0])) } catch { nodes = [] }
+    if (idx != null) return [nodes[idx]].filter(Boolean);
+    if (toks.length === 1) return nodes;
+  }
+  // 原生 CSS 兜底(div.result 之类真实 CSS)
+  try { return Array.from(sc.querySelectorAll(step)) } catch { return [] }
 }
 function analyzeHtmlEl(ctx, rule, baseUrl) {
   // 在给定元素(ctx)上求值文本规则
