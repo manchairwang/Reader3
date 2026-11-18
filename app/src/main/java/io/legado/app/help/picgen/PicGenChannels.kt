@@ -105,7 +105,11 @@ object PicGenChannels {
                 "blurry, watermark, signature, text, bad anatomy, bad hands"
     val QWEN_HOSTS = listOf(
         "http://127.0.0.1:1236",
-        "http://win.tail976197.ts.net:1236"
+        "http://win.tail976197.ts.net:1236",
+        //tailscale IP 直连候选：不依赖手机端 MagicDNS 域名解析
+        "http://100.117.227.114:1236",
+        //局域网直连候选（同一 WiFi 下无需 tailscale）
+        "http://192.168.1.27:1236"
     )
 
     data class AgnesSite(val key: String, val base: String, val tokens: List<String>)

@@ -64,12 +64,14 @@ object PicGenManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        //全渠道探活循环：启动即探活一轮，之后每 10 分钟检测；可达则自动启用对应渠道（界面上无开关）
+        //全渠道探活循环：启动即探活一轮；本地渠道(pony/qwen)未启用时 30s 快速重试，
+        //全部启用后切回 10 分钟；云端渠道错过一轮也无妨（下轮补充）
         scope.launch {
             while (true) {
                 probeOmniHosts()
                 refreshSvcModels()
-                kotlinx.coroutines.delay(10 * 60 * 1000L)
+                val needFast = !PicGenConfig.channelPony || !PicGenConfig.channelQwen
+                kotlinx.coroutines.delay(if (needFast) 30_000L else 10 * 60 * 1000L)
             }
         }
     }
