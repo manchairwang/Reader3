@@ -19,41 +19,49 @@
             android:text="@string/pic_gen_config"
             android:textSize="18sp" />
 
+        <!--主开关：放大显示，方便点按-->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/pic_window_show" />
+                android:text="@string/pic_window_show"
+                android:textSize="18sp" />
 
             <io.legado.app.ui.widget.checkbox.SmoothCheckBox
                 android:id="@+id/cb_pic_window_show"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
                 android:layout_margin="6dp" />
         </LinearLayout>
 
+        <!--图片上显示提示词：紧随主开关之下-->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="@string/pic_window_show_info" />
+                android:text="@string/pic_window_show_info"
+                android:textSize="16sp" />
 
             <io.legado.app.ui.widget.checkbox.SmoothCheckBox
                 android:id="@+id/cb_pic_window_show_info"
-                android:layout_width="20dp"
-                android:layout_height="20dp"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
                 android:layout_margin="6dp" />
         </LinearLayout>
 
