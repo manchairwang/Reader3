@@ -625,15 +625,6 @@ object PicGenManager {
 
     // ---- 生图：agnes/sensenova/NIM/omni 多族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
-        //生图前即时探活本地渠道：服务中途启动也立即接入，不必等探活周期
-        if (!PicGenConfig.channelQwen) {
-            qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
-            PicGenConfig.channelQwen = qwenActiveBase != null
-        }
-        if (!PicGenConfig.channelPony) {
-            ponyActiveBase = PicGenChannels.PONY_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
-            PicGenConfig.channelPony = ponyActiveBase != null
-        }
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
         //agnes 族
         if (PicGenConfig.channelAgnesCn || PicGenConfig.channelAgnesCom) {
