@@ -1,6 +1,7 @@
 package io.legado.app.ui.book.read
 
 import android.content.Context
+import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -86,12 +87,31 @@ class PicWindowView @JvmOverloads constructor(
                 context.sendToClip(text)
             }
         }
-        setOnTouchListener { _, e ->
-            val handled = gestureDetector.onTouchEvent(e)
-            performClick()
-            //必须返回 true 消费 DOWN,否则后续 MOVE/UP 不再派发,翻页手势失效
-            handled
+    }
+
+    //与正文 ReadView 相同的拦截模式：除按钮区域外全部拦截，手势在 onTouchEvent 统一处理。
+    //setOnTouchListener 方案不可靠：事件先派发给子 view(iv_pic 占满窗口)，
+    //父 view 的 listener 只在子 view 不消费时才被调用，翻页时灵时不灵。
+    private val hitRect = android.graphics.Rect()
+
+    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+        if (ev?.action == MotionEvent.ACTION_DOWN) {
+            //关闭按钮/状态文字区域内不拦截，保住点击
+            btnClose.getHitRect(hitRect)
+            if (hitRect.contains(ev.x.toInt(), ev.y.toInt())) return false
+            if (tvStatus.visibility == VISIBLE) {
+                tvStatus.getHitRect(hitRect)
+                if (hitRect.contains(ev.x.toInt(), ev.y.toInt())) return false
+            }
         }
+        return true
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        gestureDetector.onTouchEvent(event)
+        //消费事件流，保证后续 MOVE/UP 持续到达
+        return true
     }
 
     fun setBitmap(bitmap: Bitmap) {
