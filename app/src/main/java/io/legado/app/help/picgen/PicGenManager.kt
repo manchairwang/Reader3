@@ -51,6 +51,7 @@ object PicGenManager {
     private const val MAX_FAIL = 2                //连续失败次数阈值
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
     private const val MAX_CONCURRENT = 5         //并发任务上限
+    private const val PROMPT_MAX = 3000         //生图提示词上限（含当前页全文，远超旧 900）
 
     //动态分辨率档位：综合就绪度+耗时决策（decideSize）
     private const val LOW_SIZE = "512x512"
@@ -293,7 +294,7 @@ object PicGenManager {
     fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
         if (!PicGenConfig.windowShow) return
         val cleaned = pages.filter { it.second.isNotBlank() }
-            .map { (key, text) -> key to text.take(1600) }
+            .map { (key, text) -> key to text }
             .filter { it.second.length >= 20 }
         if (cleaned.isEmpty()) return
         scope.launch {
@@ -448,7 +449,11 @@ object PicGenManager {
             parts.add(PromptBuilder.buildFallbackPrompt(pageText))
         }
         PicStyleConfig.promptFor(ReadBook.book)?.let { parts.add(it) }
-        val prompt = mergeKeywords(parts)
+        var prompt = mergeKeywords(parts)
+        //当前阅读窗口全文：作为独立输入附加（保留原文，不参与关键词去重）
+        if (PicGenConfig.promptIncludeFullText && pageText.isNotBlank()) {
+            prompt = "$prompt\n${pageText.trim()}"
+        }
         //单图约束：禁多格拼图/组图，只出一张完整图（对全渠道统一追加）
         return "$prompt, single image only, one complete picture, no grid, no collage, no multiple panels, no split panels, no comic panels, no text"
     }
@@ -652,7 +657,7 @@ object PicGenManager {
         }
         if (PicGenConfig.channelQwen) {
             qwenActiveBase?.let { base ->
-                families.add { localTxt2Img(base, prompt.take(900))?.let { it to "qwen@local" } }
+                families.add { localTxt2Img(base, prompt.take(PROMPT_MAX))?.let { it to "qwen@local" } }
             }
         }
         if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
@@ -676,7 +681,7 @@ object PicGenManager {
             val body = gson.toJson(
                 mapOf(
                     "model" to model,
-                    "prompt" to prompt.take(900),
+                    "prompt" to prompt.take(PROMPT_MAX),
                     "n" to 1,
                     "size" to dynamicSizePx,
                     "response_format" to "b64_json"
@@ -792,7 +797,7 @@ object PicGenManager {
                 val body = gson.toJson(
                     mapOf(
                         "model" to model,
-                        "prompt" to prompt.take(900),
+                        "prompt" to prompt.take(PROMPT_MAX),
                         "n" to 1,
                         "size" to dynamicSizePx,
                         "response_format" to "b64_json"
