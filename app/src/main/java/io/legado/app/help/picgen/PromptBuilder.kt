@@ -26,6 +26,19 @@ object PromptBuilder {
         return prompt
     }
 
+    //三章全文摘要词提示词：要求更多关键词（几十个），供聚合生图
+    const val CHAPTER_SUMMARY_PROMPT =
+        "You are a stable-diffusion prompt engineer. Read the novel chapters below and write an English image-generation keyword pool.\n" +
+                "OUTPUT RULES (mandatory):\n" +
+                "1. Output English tags separated by commas. NO sentences, NO explanations.\n" +
+                "2. Tags MUST cover: recurring characters, outfits, actions, locations, props, weather, time of day, mood, art style.\n" +
+                "3. Use 30 to 60 tags total, Danbooru tag style, lowercase. Each tag unique.\n" +
+                "4. First line must be exactly: TAGS:\n" +
+                "Output format:\nTAGS:\n<comma separated english tags>\n"
+
+    /** 拼三章全文提示词（截 9000 字防超长） */
+    fun buildChapterPrompt(text: String): String = CHAPTER_SUMMARY_PROMPT + text.take(9000)
+
     private val hanRegex = Regex("[\\u4e00-\\u9fff]+")
     private val tagLetterRegex = Regex("[a-z]", RegexOption.IGNORE_CASE)
 

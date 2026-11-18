@@ -37,14 +37,10 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
 
     private fun initData() = binding.run {
         cbPicWindowShow.isChecked = PicGenConfig.windowShow
+        cbPicWindowShowInfo.isChecked = PicGenConfig.showInfo
         cbChannelAgnesCn.isChecked = PicGenConfig.channelAgnesCn
         cbChannelAgnesCom.isChecked = PicGenConfig.channelAgnesCom
-        cbChannelOmniWin.isChecked = PicGenConfig.channelOmniWin
-        cbChannelOmniCat.isChecked = PicGenConfig.channelOmniCat
-        cbChannelPony.isChecked = PicGenConfig.channelPony
-        cbChannelQwen.isChecked = PicGenConfig.channelQwen
         cbLlmEnable.isChecked = PicGenConfig.llmEnable
-        cbTailscaleDetect.isChecked = PicGenConfig.tailscaleAutoDetect
         dsbPicHeightRatio.valueFormat = { "${it.coerceAtLeast(15)}%" }
         dsbPicHeightRatio.progress = (PicGenConfig.heightRatio * 100).toInt()
         dsbPicWidthRatio.valueFormat = { "${it.coerceAtLeast(15)}%" }
@@ -55,23 +51,14 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
         cbPicWindowShow.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.windowShow = isChecked
         }
+        cbPicWindowShowInfo.onCheckedChangeListener = { _, isChecked ->
+            PicGenConfig.showInfo = isChecked
+        }
         cbChannelAgnesCn.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.channelAgnesCn = isChecked
         }
         cbChannelAgnesCom.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.channelAgnesCom = isChecked
-        }
-        cbChannelOmniWin.onCheckedChangeListener = { _, isChecked ->
-            PicGenConfig.channelOmniWin = isChecked
-        }
-        cbChannelOmniCat.onCheckedChangeListener = { _, isChecked ->
-            PicGenConfig.channelOmniCat = isChecked
-        }
-        cbChannelPony.onCheckedChangeListener = { _, isChecked ->
-            PicGenConfig.channelPony = isChecked
-        }
-        cbChannelQwen.onCheckedChangeListener = { _, isChecked ->
-            PicGenConfig.channelQwen = isChecked
         }
         cbLlmEnable.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.llmEnable = isChecked
@@ -81,9 +68,6 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
         }
         dsbPicWidthRatio.onChanged = {
             PicGenConfig.widthRatio = it.coerceIn(15, 60) / 100f
-        }
-        cbTailscaleDetect.onCheckedChangeListener = { _, isChecked ->
-            PicGenConfig.tailscaleAutoDetect = isChecked
         }
     }
 
