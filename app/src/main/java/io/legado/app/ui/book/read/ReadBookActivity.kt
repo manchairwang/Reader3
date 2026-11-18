@@ -1102,6 +1102,10 @@ class ReadBookActivity : BaseReadBookActivity(),
                 keyPage(if (next) PageDirection.NEXT else PageDirection.PREV)
             }
         }
+        //中 1/3 单击：与正文一致开菜单（可配置点击区域行为，正文走 ReadView.click）
+        picWindow.onCenterTap = {
+            if (!menuLayoutIsVisible) showActionMenu()
+        }
         upPicWindowLayout()
     }
 
@@ -1131,6 +1135,9 @@ class ReadBookActivity : BaseReadBookActivity(),
                 bottomMargin = 0
                 marginEnd = w
             }
+            //整体窗口几何(横屏: 图片窗贴右边, 左缘 = 屏宽 - w)
+            picWindow.wholeWidthPx = resources.displayMetrics.widthPixels
+            picWindow.wholeLeftPx = resources.displayMetrics.widthPixels - w
         } else {
             val h = (resources.displayMetrics.heightPixels * PicGenConfig.heightRatio).toInt()
             picWindow.visibility = View.VISIBLE
@@ -1144,6 +1151,9 @@ class ReadBookActivity : BaseReadBookActivity(),
                 bottomMargin = h
                 marginEnd = 0
             }
+            //整体窗口几何(竖屏: 图片窗与正文同宽贴左)
+            picWindow.wholeWidthPx = resources.displayMetrics.widthPixels
+            picWindow.wholeLeftPx = 0
         }
         //窗口尺寸变化后重排
         triggerPicGen()

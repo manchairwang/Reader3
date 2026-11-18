@@ -38,6 +38,16 @@ class PicWindowView @JvmOverloads constructor(
     /** 窗口手势翻页：true=下一页，false=上一页 */
     var onPageTurn: ((next: Boolean) -> Unit)? = null
 
+    /** 中 1/3 单击(正文默认开菜单)，交 activity 处理 */
+    var onCenterTap: (() -> Unit)? = null
+
+    //整体窗口几何(正文+图片窗口视为一个大窗口): activity 布局后提供, 单击分区用
+    var wholeWidthPx: Int = 0
+    var wholeLeftPx: Int = 0
+
+    //本次触摸是否发生了拖动(拖动不算单击)
+    private var gestureDetectorDragged = false
+
     //与正文翻页一致的手势判定：横向位移为主即翻页，速度阈值同 PageDelegate fling
     private val gestureDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent): Boolean = true
@@ -51,6 +61,7 @@ class PicWindowView @JvmOverloads constructor(
             if (e1 == null) return false
             val dx = e2.x - e1.x
             if (kotlin.math.abs(dx) < 50) return false
+            gestureDetectorDragged = true
             onPageTurn?.invoke(dx < 0)
             return true
         }
@@ -63,6 +74,7 @@ class PicWindowView @JvmOverloads constructor(
         ): Boolean {
             if (e1 == null) return false
             if (kotlin.math.abs(e2.x - e1.x) < 80) return false
+            gestureDetectorDragged = true
             onPageTurn?.invoke(e2.x - e1.x < 0)
             return true
         }
@@ -110,6 +122,18 @@ class PicWindowView @JvmOverloads constructor(
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         gestureDetector.onTouchEvent(event)
+        if (event.action == MotionEvent.ACTION_UP && !gestureDetectorDragged) {
+            //单击翻页：与正文同区域划分(左1/3上一页, 中1/3不翻页或开菜单, 右1/3下一页)。
+            //正文尺寸(窗口+正文整体)由 activity 提供,保证两个窗口的点击区域视觉上连续。
+            val xInWhole = wholeWidthPx > 0
+            when {
+                xInWhole && event.x + wholeLeftPx < wholeWidthPx * 0.33f -> onPageTurn?.invoke(false)
+                xInWhole && event.x + wholeLeftPx > wholeWidthPx * 0.66f -> onPageTurn?.invoke(true)
+                //中 1/3: 正文默认开菜单; 图片窗口没有菜单逻辑,同样回调交 activity 决定
+                else -> onCenterTap?.invoke()
+            }
+        }
+        if (event.action == MotionEvent.ACTION_DOWN) gestureDetectorDragged = false
         //消费事件流，保证后续 MOVE/UP 持续到达
         return true
     }
