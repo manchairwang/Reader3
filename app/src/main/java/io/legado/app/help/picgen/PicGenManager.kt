@@ -251,11 +251,14 @@ object PicGenManager {
             val ms = System.currentTimeMillis() - t0
             val svc = svcCache[siteKey]
             val chatModels = svc?.chat?.takeIf { it.isNotEmpty() } ?: fallbackChat
-            //实测最多试 3 个模型：发现的单个模型可能 404/403/429/空响应，不代表服务不可用
+            //实测试所有候选模型（发现 + 兜底去重）：单个模型 403/404/429 不代表服务不可用，
+            //任一模型返回 HTTP 200（含空响应）即判定服务可用
+            val attempts = LinkedHashSet(chatModels)
+            attempts += fallbackChat
             var okModel: String? = null
             var lastRes: String? = null
-            var lastModel = chatModels.first()
-            for (m in chatModels.take(3)) {
+            var lastModel = attempts.first()
+            for (m in attempts) {
                 lastModel = m
                 lastRes = testChat(base, token, m)
                 if (lastRes != null && lastRes.startsWith("✓")) {
@@ -267,7 +270,7 @@ object PicGenManager {
                 "$siteKey: ✓ ${ms}ms · 发现模型${disc.ids?.size ?: 0}个(图${svc?.image?.size ?: 0}/文${svc?.chat?.size ?: 0}) " +
                     "摘要模型[$okModel] · 实测 $lastRes"
             } else {
-                "$siteKey: ✗ 摘要实测失败($lastModel) ${lastRes ?: "无响应"} " +
+                "$siteKey: ✗ 试了${attempts.size}个模型全失败(最后 $lastModel) ${lastRes ?: "无响应"} " +
                     "· 发现: HTTP ${disc.httpCode ?: "-"} ${disc.err ?: ""}"
             }
         } catch (e: Exception) {
@@ -600,9 +603,20 @@ object PicGenManager {
                 postJsonRequest("$base/v1/chat/completions", body, token)
             } ?: return "超时"
             val obj = parseJson(data) ?: return "响应解析失败"
-            val text = obj.getAsJsonArray("choices")?.get(0)?.asJsonObject
-                ?.getAsJsonObject("message")?.get("content")?.asString
-            if (text.isNullOrEmpty()) "空响应" else "✓ ${System.currentTimeMillis() - t0}ms"
+            val choices = obj.getAsJsonArray("choices") ?: return "无choices"
+            val message = choices[0]?.asJsonObject?.getAsJsonObject("message")
+            val text = message?.get("content")?.takeIf { !it.isJsonNull }?.asString
+            //DeepSeek 等推理型模型把内容放在 reasoning_content，HTTP 200 即视为服务可用
+            if (text.isNullOrEmpty()) {
+                val reasoning = message?.get("reasoning_content")?.takeIf { !it.isJsonNull }?.asString
+                if (!reasoning.isNullOrEmpty()) {
+                    "✓ ${System.currentTimeMillis() - t0}ms(推理模型)"
+                } else {
+                    "空响应"
+                }
+            } else {
+                "✓ ${System.currentTimeMillis() - t0}ms"
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             e.message ?: e.javaClass.simpleName
@@ -611,6 +625,15 @@ object PicGenManager {
 
     // ---- 生图：agnes/sensenova/NIM/omni 多族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
+        //生图前即时探活本地渠道：服务中途启动也立即接入，不必等探活周期
+        if (!PicGenConfig.channelQwen) {
+            qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
+            PicGenConfig.channelQwen = qwenActiveBase != null
+        }
+        if (!PicGenConfig.channelPony) {
+            ponyActiveBase = PicGenChannels.PONY_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
+            PicGenConfig.channelPony = ponyActiveBase != null
+        }
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
         //agnes 族
         if (PicGenConfig.channelAgnesCn || PicGenConfig.channelAgnesCom) {
