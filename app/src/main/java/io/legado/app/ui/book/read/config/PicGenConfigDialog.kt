@@ -37,6 +37,7 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
 
     private fun initData() = binding.run {
         cbPicWindowShow.isChecked = PicGenConfig.windowShow
+        cbPicWindowShowInfo.isChecked = PicGenConfig.showInfo
         cbChannelAgnesCn.isChecked = PicGenConfig.channelAgnesCn
         cbChannelAgnesCom.isChecked = PicGenConfig.channelAgnesCom
         cbLlmEnable.isChecked = PicGenConfig.llmEnable
@@ -49,6 +50,9 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
     private fun initView() = binding.run {
         cbPicWindowShow.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.windowShow = isChecked
+        }
+        cbPicWindowShowInfo.onCheckedChangeListener = { _, isChecked ->
+            PicGenConfig.showInfo = isChecked
         }
         cbChannelAgnesCn.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.channelAgnesCn = isChecked

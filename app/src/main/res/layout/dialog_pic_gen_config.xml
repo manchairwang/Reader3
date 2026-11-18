@@ -38,6 +38,25 @@
                 android:layout_margin="6dp" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/pic_window_show_info" />
+
+            <io.legado.app.ui.widget.checkbox.SmoothCheckBox
+                android:id="@+id/cb_pic_window_show_info"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_margin="6dp" />
+        </LinearLayout>
+
         <io.legado.app.ui.widget.DetailSeekBar
             android:id="@+id/dsb_pic_height_ratio"
             android:layout_width="match_parent"

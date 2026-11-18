@@ -6,11 +6,11 @@
       "material": {
         "certpath": "C:\\Users\\Administrator\\.ohos\\config\\default_HarmonyRelease_ITBdy-5JOpt40L2tLh_gcHkTSnxE3jZr5aj6YMSpyfA=.cer",
         "keyAlias": "debugKey",
-        "keyPassword": "0000001B528675EBC0148D26B518E86B6A39DD21F07FFDC0DB9A246C4D87227FF05EA479D485D66475CB4B",
+        "keyPassword": "0000001B94AA138369A56809FBFE2530936421D5E51811B163B8E88694CF389C9640BECE2DC43D5E1C9A62",
         "profile": "C:\\Users\\Administrator\\.ohos\\config\\default_HarmonyRelease_ITBdy-5JOpt40L2tLh_gcHkTSnxE3jZr5aj6YMSpyfA=.p7b",
         "signAlg": "SHA256withECDSA",
         "storeFile": "C:\\Users\\Administrator\\.ohos\\config\\default_HarmonyRelease_ITBdy-5JOpt40L2tLh_gcHkTSnxE3jZr5aj6YMSpyfA=.p12",
-        "storePassword": "0000001B33C75E9289C3437F65610FEDBB2ACD251A47781354DDCDDE512F193028A7C3A9CB2CBD82670EB3"
+        "storePassword": "0000001B012AB7B97515395ADB44561C14E95E0948D83869F06D6EEBA8B101CC89ED12760F77A6F550AF7E"
       }
     }
   ]

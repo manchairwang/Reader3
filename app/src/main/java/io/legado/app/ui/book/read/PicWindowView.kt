@@ -30,6 +30,7 @@ class PicWindowView @JvmOverloads constructor(
     private val pbPic: ProgressBar
     private val tvStatus: TextView
     private val btnClose: ImageView
+    private val tvInfo: TextView
 
     var onClose: (() -> Unit)? = null
 
@@ -72,6 +73,7 @@ class PicWindowView @JvmOverloads constructor(
         pbPic = findViewById(R.id.pb_pic)
         tvStatus = findViewById(R.id.tv_pic_status)
         btnClose = findViewById(R.id.btn_pic_close)
+        tvInfo = findViewById(R.id.tv_pic_info)
         btnClose.setOnClickListener {
             PicGenConfig.windowShow = false
             visibility = GONE
@@ -85,8 +87,10 @@ class PicWindowView @JvmOverloads constructor(
             }
         }
         setOnTouchListener { _, e ->
-            gestureDetector.onTouchEvent(e)
+            val handled = gestureDetector.onTouchEvent(e)
             performClick()
+            //必须返回 true 消费 DOWN,否则后续 MOVE/UP 不再派发,翻页手势失效
+            handled
         }
     }
 
@@ -95,6 +99,16 @@ class PicWindowView @JvmOverloads constructor(
         ivPic.visibility = VISIBLE
         pbPic.visibility = GONE
         tvStatus.visibility = GONE
+    }
+
+    /** 左下角诊断层：info 形如 "提示词\n来源"，null 或开关关闭则隐藏 */
+    fun showInfo(info: String?) {
+        if (info != null && PicGenConfig.showInfo) {
+            tvInfo.text = info
+            tvInfo.visibility = VISIBLE
+        } else {
+            tvInfo.visibility = GONE
+        }
     }
 
     //加载中：保留旧图，仅叠转圈，避免黑底闪烁

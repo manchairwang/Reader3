@@ -188,6 +188,7 @@ object PreferKey {
 
     //图片窗口
     const val picWindowShow = "picWindowShow"
+    const val picWindowShowInfo = "picWindowShowInfo"
     const val picWindowHeightRatio = "picWindowHeightRatio"
     const val picWindowWidthRatio = "picWindowWidthRatio"
     const val picGenChannelAgnesCn = "picGenChannelAgnesCn"

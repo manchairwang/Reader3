@@ -132,6 +132,9 @@ object PicGenManager {
     private val jobs = ConcurrentHashMap<String, Job>()
     private val jobsMutex = Mutex()
 
+    //生图信息表：cacheKey -> "prompt\nsource"（图片窗口左下角诊断层用）
+    private val genInfoCache = ConcurrentHashMap<String, String>()
+
     //冷却表：路由 key -> 恢复时间戳
     private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val failCount = ConcurrentHashMap<String, Int>()
@@ -246,12 +249,23 @@ object PicGenManager {
             val ms = System.currentTimeMillis() - t0
             val svc = svcCache[siteKey]
             val chatModels = svc?.chat?.takeIf { it.isNotEmpty() } ?: fallbackChat
-            val chatRes = testChat(base, token, chatModels.first())
-            if (chatRes != null && chatRes.startsWith("✓")) {
+            //实测最多试 3 个模型：发现的单个模型可能 404/403/429/空响应，不代表服务不可用
+            var okModel: String? = null
+            var lastRes: String? = null
+            var lastModel = chatModels.first()
+            for (m in chatModels.take(3)) {
+                lastModel = m
+                lastRes = testChat(base, token, m)
+                if (lastRes != null && lastRes.startsWith("✓")) {
+                    okModel = m
+                    break
+                }
+            }
+            if (okModel != null) {
                 "$siteKey: ✓ ${ms}ms · 发现模型${disc.ids?.size ?: 0}个(图${svc?.image?.size ?: 0}/文${svc?.chat?.size ?: 0}) " +
-                    "摘要模型[${chatModels.take(2).joinToString("/")}] · 实测 ${chatRes}"
+                    "摘要模型[$okModel] · 实测 $lastRes"
             } else {
-                "$siteKey: ✗ 摘要实测失败(${chatModels.first()}) ${chatRes ?: "无响应"} " +
+                "$siteKey: ✗ 摘要实测失败($lastModel) ${lastRes ?: "无响应"} " +
                     "· 发现: HTTP ${disc.httpCode ?: "-"} ${disc.err ?: ""}"
             }
         } catch (e: Exception) {
@@ -383,6 +397,7 @@ object PicGenManager {
                 }
                 //记录本次生图耗时（滑动窗口，供动态分辨率决策）
                 recordGenTime(System.currentTimeMillis() - t0, source)
+                genInfoCache[cacheKey] = "$prompt\n$source"
                 val bmp = decodeBytes(bytes) ?: throw IllegalStateException("图片解码失败")
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
@@ -428,7 +443,9 @@ object PicGenManager {
             parts.add(PromptBuilder.buildFallbackPrompt(pageText))
         }
         PicStyleConfig.promptFor(ReadBook.book)?.let { parts.add(it) }
-        return mergeKeywords(parts)
+        val prompt = mergeKeywords(parts)
+        //单图约束：禁多格拼图/组图，只出一张完整图（对全渠道统一追加）
+        return "$prompt, single image only, one complete picture, no grid, no collage, no multiple panels, no split panels, no comic panels, no text"
     }
 
     //① 三章摘要词缓存：章号 → 关键词串
@@ -572,7 +589,8 @@ object PicGenManager {
                 mapOf(
                     "model" to model,
                     "messages" to listOf(mapOf("role" to "user", "content" to "hi")),
-                    "max_tokens" to 8
+                    //部分服务拒绝过小的 max_tokens(内容不够切出即报错/返回空 choices),16 足够且仍极便宜
+                    "max_tokens" to 16
                 )
             )
             val t0 = System.currentTimeMillis()
@@ -979,6 +997,9 @@ object PicGenManager {
     }
 
     fun cachedBitmap(cacheKey: String): Bitmap? = memCache.get(cacheKey)
+
+    /** 某页生图信息："提示词\n来源(model@site)"，未记录返回 null（图片窗口诊断层用） */
+    fun infoFor(cacheKey: String): String? = genInfoCache[cacheKey]
 
     /** Gson 解析 JSON 字符串为 JsonObject */
     private fun parseJson(data: String?): JsonObject? {

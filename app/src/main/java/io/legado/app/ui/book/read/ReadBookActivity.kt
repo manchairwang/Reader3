@@ -1086,6 +1086,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         PicGenManager.onImageReady = { key, bitmap, _ ->
             if (key == currentPicKey) {
                 picWindow.setBitmap(bitmap)
+                picWindow.showInfo(PicGenManager.infoFor(key))
             }
         }
         PicGenManager.onStatus = { key, status ->
@@ -1153,6 +1154,10 @@ class ReadBookActivity : BaseReadBookActivity(),
      */
     fun onPicConfigChanged() {
         upPicWindowLayout()
+        //诊断层开关可能已切换：当前页有图时立即刷新显隐
+        currentPicKey?.let { key ->
+            if (binding.picWindow.hasImage()) binding.picWindow.showInfo(PicGenManager.infoFor(key))
+        }
     }
 
     /**
@@ -1187,6 +1192,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             //先显示缓存，无则 loading（loading 保留旧图叠转圈）
             PicGenManager.cachedBitmap(key)?.let {
                 picWindow.setBitmap(it)
+                picWindow.showInfo(PicGenManager.infoFor(key))
             } ?: picWindow.showLoading()
         }
         PicGenManager.onVisiblePagesChanged(pages)

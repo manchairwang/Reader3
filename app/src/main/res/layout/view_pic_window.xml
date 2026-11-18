@@ -42,4 +42,17 @@
         android:padding="4dp"
         android:src="@drawable/ic_baseline_close" />
 
+    <!--左下角诊断层：提示词 + 生成来源(服务器/模型)，配置开关控制显隐-->
+    <TextView
+        android:id="@+id/tv_pic_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|start"
+        android:ellipsize="end"
+        android:maxLines="3"
+        android:padding="4dp"
+        android:textColor="#FFFFFF"
+        android:textSize="10sp"
+        android:visibility="gone" />
+
 </FrameLayout>

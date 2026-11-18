@@ -23,6 +23,11 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
         get() = if (contains(PreferKey.picWindowShow)) getBoolean(PreferKey.picWindowShow) else true
         set(value) = putBoolean(PreferKey.picWindowShow, value)
 
+    //左下角诊断层：提示词 + 生成来源(服务器/模型)
+    var showInfo: Boolean
+        get() = if (contains(PreferKey.picWindowShowInfo)) getBoolean(PreferKey.picWindowShowInfo) else false
+        set(value) = putBoolean(PreferKey.picWindowShowInfo, value)
+
     //竖屏：图片窗口高度占屏幕高度比例（旧默认 0.30 自动升级 0.45）
     var heightRatio: Float
         get() = getFloat(PreferKey.picWindowHeightRatio, 0f)
