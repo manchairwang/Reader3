@@ -1,6 +1,7 @@
 package io.legado.app.ui.book.read
 
 import android.content.Context
+import android.animation.ObjectAnimator
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.util.AttributeSet
@@ -8,10 +9,11 @@ import android.view.GestureDetector
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.ProgressBar
 import android.widget.TextView
+import android.animation.ValueAnimator
 import io.legado.app.R
 import io.legado.app.help.picgen.PicGenConfig
 import io.legado.app.utils.sendToClip
@@ -28,10 +30,11 @@ class PicWindowView @JvmOverloads constructor(
 ) : FrameLayout(context, attrs) {
 
     private val ivPic: ImageView
-    private val pbPic: ProgressBar
+    private val ivLoading: ImageView
     private val tvStatus: TextView
     private val btnClose: ImageView
     private val tvInfo: TextView
+    private lateinit var loadingAnimator: ObjectAnimator
 
     var onClose: (() -> Unit)? = null
 
@@ -83,7 +86,7 @@ class PicWindowView @JvmOverloads constructor(
     init {
         LayoutInflater.from(context).inflate(R.layout.view_pic_window, this, true)
         ivPic = findViewById(R.id.iv_pic)
-        pbPic = findViewById(R.id.pb_pic)
+        ivLoading = findViewById(R.id.iv_pic_loading)
         tvStatus = findViewById(R.id.tv_pic_status)
         btnClose = findViewById(R.id.btn_pic_close)
         tvInfo = findViewById(R.id.tv_pic_info)
@@ -98,6 +101,13 @@ class PicWindowView @JvmOverloads constructor(
             if (text.isNotBlank()) {
                 context.sendToClip(text)
             }
+        }
+        //加载转圈：自绘环形匀速旋转。系统 progressBarStyle 在部分 ROM 渲染成
+        //1/4 弧段闪烁且不转（用户反馈"一直 1/4 段、没有进展"），故代码动画代替
+        loadingAnimator = ObjectAnimator.ofFloat(ivLoading, View.ROTATION, 0f, 360f).apply {
+            duration = 900L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
         }
     }
 
@@ -141,7 +151,7 @@ class PicWindowView @JvmOverloads constructor(
     fun setBitmap(bitmap: Bitmap) {
         ivPic.setImageBitmap(bitmap)
         ivPic.visibility = VISIBLE
-        pbPic.visibility = GONE
+        stopLoading()
         tvStatus.visibility = GONE
     }
 
@@ -157,12 +167,13 @@ class PicWindowView @JvmOverloads constructor(
 
     //加载中：保留旧图，仅叠转圈，避免黑底闪烁
     fun showLoading() {
-        pbPic.visibility = VISIBLE
+        ivLoading.visibility = VISIBLE
+        loadingAnimator.start()
         tvStatus.visibility = GONE
     }
 
     fun showError(msg: String) {
-        pbPic.visibility = GONE
+        stopLoading()
         ivPic.visibility = GONE
         tvStatus.visibility = VISIBLE
         tvStatus.text = msg
@@ -172,7 +183,11 @@ class PicWindowView @JvmOverloads constructor(
         //错误信息保留不被进度覆盖（点击可复制）
         if (tvStatus.visibility == VISIBLE && tvStatus.text.startsWith("失败")) return
         if (ivPic.visibility != VISIBLE) {
-            pbPic.visibility = VISIBLE
+            //失败时停转圈：否则一直转个不停（用户看到"没有进展"）
+            if (msg.startsWith("失败")) stopLoading() else {
+                ivLoading.visibility = VISIBLE
+                loadingAnimator.start()
+            }
             tvStatus.visibility = VISIBLE
             tvStatus.text = msg
         }
@@ -181,9 +196,14 @@ class PicWindowView @JvmOverloads constructor(
     fun clear() {
         ivPic.setImageDrawable(null)
         ivPic.visibility = GONE
-        pbPic.visibility = GONE
+        stopLoading()
         tvStatus.visibility = GONE
     }
 
     fun hasImage(): Boolean = ivPic.visibility == VISIBLE
+
+    private fun stopLoading() {
+        ivLoading.visibility = GONE
+        loadingAnimator.cancel()
+    }
 }

@@ -1234,6 +1234,7 @@
     <string name="sys_image_picker">系统图片选择器</string>
     <string name="pic_window">图片窗口</string>
     <string name="pic_window_close">关闭图片窗口</string>
+    <string name="pic_window_loading">图片加载中</string>
     <string name="pic_gen_config">图片窗口设置</string>
     <string name="pic_style_config">生图风格</string>
     <string name="agnes_keys_config">生图 / 摘要 Key 管理（3 个服务）</string>

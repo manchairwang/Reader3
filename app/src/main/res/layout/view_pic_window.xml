@@ -11,12 +11,15 @@
         android:scaleType="centerCrop"
         android:contentDescription="@string/pic_window" />
 
-    <ProgressBar
-        android:id="@+id/pb_pic"
-        style="?android:attr/progressBarStyle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+    <!--加载转圈：自绘环形+代码旋转动画。系统 progressBarStyle 在部分 ROM 渲染成
+        1/4 弧段闪烁且不转(用户反馈"没有进展")，故不用默认样式-->
+    <ImageView
+        android:id="@+id/iv_pic_loading"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
         android:layout_gravity="center"
+        android:contentDescription="@string/pic_window_loading"
+        android:src="@drawable/pic_loading_ring"
         android:visibility="gone" />
 
     <TextView
