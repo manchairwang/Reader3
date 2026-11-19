@@ -495,6 +495,13 @@ object PicGenManager {
     private val genTimes = ArrayDeque<Long>(6)
     private val genTimesMutex = Any()
 
+    //按组合(base|token) 记录的最近 10 次生图耗时：用于估计该组合出图速度
+    private val comboTimes = ConcurrentHashMap<String, ArrayDeque<Long>>()
+
+    //最近 10 次翻页间隔（单页阅读耗时）：若用户看一页比生成一页还快 → 降分辨率
+    private val readTimes = ArrayDeque<Long>(10)
+    private val readTimesMutex = Any()
+
     /** 记录一次生图耗时（毫秒），source 形如 "model@site" */
     private fun recordGenTime(ms: Long, @Suppress("UNUSED_PARAMETER") source: String) {
         synchronized(genTimesMutex) {
@@ -502,6 +509,39 @@ object PicGenManager {
             if (genTimes.size > 6) genTimes.removeFirst()
         }
         LogUtils.d(TAG, "gen time: ${ms}ms via $source size=$dynamicSizePx")
+    }
+
+    /** 按组合记录最近 10 次耗时（base+token 维度，竞速各组合在 imageOpenai/localTxt2Img 成功处调用） */
+    private fun recordComboTime(base: String, token: String, ms: Long) {
+        val key = "$base|${token.takeLast(8)}"
+        val q = comboTimes.getOrPut(key) { ArrayDeque(10) }
+        synchronized(q) {
+            q.addLast(ms)
+            if (q.size > 10) q.removeFirst()
+        }
+    }
+
+    /** 某组合最近 10 次平均耗时，无样本返回 0 */
+    fun avgComboTimeMs(base: String, token: String): Long {
+        val q = comboTimes["$base|${token.takeLast(8)}"] ?: return 0L
+        synchronized(q) {
+            if (q.isEmpty()) return 0L
+            return q.sum() / q.size
+        }
+    }
+
+    /** 记录一次翻页间隔（单页阅读耗时），供分辨率决策 */
+    fun recordPageRead(ms: Long) {
+        if (ms <= 0 || ms > 60 * 60_000L) return
+        synchronized(readTimesMutex) {
+            readTimes.addLast(ms)
+            if (readTimes.size > 10) readTimes.removeFirst()
+        }
+    }
+
+    /** 用户最近 10 次平均单页阅读耗时，无样本返回 0 */
+    fun avgReadMs(): Long = synchronized(readTimesMutex) {
+        if (readTimes.isEmpty()) 0L else readTimes.sum() / readTimes.size
     }
 
     /** 近期平均生图耗时（毫秒），无样本返回 0 */
@@ -527,13 +567,17 @@ object PicGenManager {
         val noneReady = readyCount == 0
         val avg = avgGenTimeMs()
         val noData = genTimesSize() == 0
+        //阅读耗时 < 生图耗时 → 用户翻页比出图快（看图等不及），降一档保证能追上前一页
+        val readMs = if (noData) 0L else avgReadMs()
+        val tooSlowForReading = readMs in 1 until avg || (avg > 0 && noData && readMs == 0L)
         return when {
-            allReady && (noData || avg <= SLOW_MS) -> HIGH_SIZE
+            allReady && (noData || avg <= SLOW_MS) && !tooSlowForReading -> HIGH_SIZE
             allReady -> BASE_SIZE
             noneReady && noData -> BASE_SIZE
             noneReady && avg <= FAST_MS -> BASE_SIZE
+            noneReady && tooSlowForReading -> LOW_SIZE
             noneReady -> LOW_SIZE
-            else -> if (avg <= FAST_MS) HIGH_SIZE else BASE_SIZE
+            else -> if (avg <= FAST_MS && !tooSlowForReading) HIGH_SIZE else BASE_SIZE
         }
     }
 
@@ -898,6 +942,7 @@ object PicGenManager {
             }
             recordSuccess(rkey)
             comboSuccess(c)
+            recordComboTime(base, token, System.currentTimeMillis() - t0)
             item.first to model
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e

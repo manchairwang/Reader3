@@ -243,6 +243,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     private val prevPageDebounce by lazy { Debounce { keyPage(PageDirection.PREV) } }
     private var bookChanged = false
     private var pageChanged = false
+    private var lastPageChangeAt = 0L
     private val handler by lazy { buildMainHandler() }
     private val screenOffRunnable by lazy { Runnable { keepScreenOn(false) } }
     private val executor = ReadBook.executor
@@ -1066,6 +1067,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         executor.execute {
             startBackupJob()
         }
+        //记录本次翻页间隔（上一次翻页到现在）= 单页阅读耗时，供分辨率决策
+        val now = System.currentTimeMillis()
+        if (lastPageChangeAt > 0L) PicGenManager.recordPageRead(now - lastPageChangeAt)
+        lastPageChangeAt = now
         triggerPicGen()
     }
 
