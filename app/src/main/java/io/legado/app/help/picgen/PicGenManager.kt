@@ -25,7 +25,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Request
@@ -52,7 +54,7 @@ object PicGenManager {
     private const val MAX_FAIL = 2                //连续失败次数阈值
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
     private const val MAX_CONCURRENT = 5         //并发任务上限
-    private const val AGNES_WAVE = 3             //agnes 一波并发请求数(全量开火会触发上游风控)
+    private const val AGNES_WAVE = 2             //agnes 一波并发请求数(与服务器并发闸一致)
     private const val PROMPT_MAX = 3000         //生图提示词上限（含当前页全文，远超旧 900）
 
     //动态分辨率档位：综合就绪度+耗时决策（decideSize）
@@ -1154,19 +1156,32 @@ object PicGenManager {
     }
 
     // ---- HTTP ----
+    //每服务器并发闸：同一 host 同时最多 2 个请求（不论多少 key），防止瞬时开火触发上游风控
+    private val serverSemaphores = ConcurrentHashMap<String, Semaphore>()
+    private fun semaphoreFor(url: String): Semaphore {
+        val host = try {
+            java.net.URI(url).host ?: url
+        } catch (e: Exception) {
+            url
+        }
+        return serverSemaphores.getOrPut(host) { Semaphore(2) }
+    }
+
     private suspend fun postJsonRequest(url: String, json: String, token: String?): String {
         val builder = Request.Builder().url(url)
         builder.postJson(json)
         if (token != null) builder.header("Authorization", "Bearer $token")
         val request = builder.build()
-        okHttpClient.newBuilder()
-            .callTimeout(IMG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .readTimeout(IMG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            .build()
-            .newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
-                return response.body?.string() ?: throw IllegalStateException("空响应")
-            }
+        semaphoreFor(url).withPermit {
+            okHttpClient.newBuilder()
+                .callTimeout(IMG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(IMG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+                .newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}")
+                    return response.body?.string() ?: throw IllegalStateException("空响应")
+                }
+        }
     }
 
     private suspend fun fetchBytes(url: String): ByteArray {
