@@ -171,10 +171,11 @@ class PicWindowView @JvmOverloads constructor(
         }
     }
 
-    //加载中：保留旧图，仅叠转圈，避免黑底闪烁
+    //加载中：切到新页后图片未就绪时，隐藏上一页图，改显示缓存拼图背景（4x4+白雾），避免沿用旧页图
     //注意：triggerPicGen 可能从协程(非主线程)触发，动画 start/cancel 必须切主线程
     fun showLoading(currentKey: String? = null) {
         post {
+            ivPic.visibility = GONE
             ivLoading.visibility = VISIBLE
             if (!loadingAnimator.isRunning) loadingAnimator.start()
             tvStatus.visibility = GONE
