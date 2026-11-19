@@ -52,6 +52,7 @@ object PicGenManager {
     private const val MAX_FAIL = 2                //连续失败次数阈值
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
     private const val MAX_CONCURRENT = 5         //并发任务上限
+    private const val AGNES_WAVE = 3             //agnes 一波并发请求数(全量开火会触发上游风控)
     private const val PROMPT_MAX = 3000         //生图提示词上限（含当前页全文，远超旧 900）
 
     //动态分辨率档位：综合就绪度+耗时决策（decideSize）
@@ -897,12 +898,19 @@ object PicGenManager {
             }
         }
         if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
-        //整场竞速设上限：任一渠道超时挂起也不再干等，超时即失败（避免转圈无限转）
-        return withTimeoutOrNull(RACE_TIMEOUT_MS) {
-            val result = raceFirst(families.map { scope.async { it() } }) { it != null }
-            @Suppress("UNCHECKED_CAST")
-            result as? Pair<ByteArray, String>
-        } ?: throw IllegalStateException("生图超时(${RACE_TIMEOUT_MS / 1000}s)")
+        //开场先探一轮：全部渠道都在冷却/下线时立即报真实原因，别伪装成超时
+        val t0 = System.currentTimeMillis()
+        val result = withTimeoutOrNull(RACE_TIMEOUT_MS) {
+            raceFirst(families.map { scope.async { it() } }) { it != null }
+        }
+        @Suppress("UNCHECKED_CAST")
+        return (result as? Pair<ByteArray, String>)
+            ?: throw IllegalStateException(
+                if (System.currentTimeMillis() - t0 >= RACE_TIMEOUT_MS)
+                    "生图超时(${RACE_TIMEOUT_MS / 1000}s)"
+                else
+                    "所有渠道暂不可用(冷却中,稍后自动恢复)"
+            )
     }
 
     //轮换计数器：NIM 组合起点
@@ -969,8 +977,10 @@ object PicGenManager {
             userKeys(custom).forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
         }
         if (combos.isEmpty()) return null
-        //一波并发：所有未冷却的 token 各发一个请求，最先出图赢；模型用发现的文生图模型，无则兜底表
-        val tasks = combos.mapIndexed { ti, (base, tk, siteKey) ->
+        //一波并发上限：瞬时全量开火会触发上游风控(429/封号)，轮换着最多发 AGNES_WAVE 个
+        val off = agnesRR
+        val wave = (0 until minOf(AGNES_WAVE, combos.size)).map { i -> combos[(off + i) % combos.size] }
+        val tasks = wave.mapIndexed { ti, (base, tk, siteKey) ->
             val svcKey = if (siteKey == "agnes_user") null else siteKey
             val models = svcKey?.let { svcModels(it, base, tk)?.image?.takeIf { im -> im.isNotEmpty() } }
                 ?: PicGenChannels.AGNES_IMAGE_MODELS
