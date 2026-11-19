@@ -403,7 +403,7 @@ object PicGenManager {
                 }
                 //记录本次生图耗时（滑动窗口，供动态分辨率决策）
                 recordGenTime(System.currentTimeMillis() - t0, source)
-                genInfoCache[cacheKey] = "$prompt\n$source"
+                genInfoCache[cacheKey] = "$source\n$prompt"
                 val bmp = decodeBytes(bytes) ?: throw IllegalStateException("图片解码失败")
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
