@@ -45,8 +45,9 @@ object PicGenManager {
 
     private const val TAG = "PicGenManager"
     private val gson = Gson()
-    private const val IMG_TIMEOUT_MS = 180_000L
-    private const val CHAT_TIMEOUT_MS = 90_000L
+    private const val IMG_TIMEOUT_MS = 75_000L   //单次生图请求上限(原180s过长,挂起请求会让用户干等)
+    private const val CHAT_TIMEOUT_MS = 60_000L
+    private const val RACE_TIMEOUT_MS = 100_000L //整场竞速上限(超时即判失败,不再无限转圈)
     private const val COOLDOWN_SEC = 45L          //连续失败冷却
     private const val MAX_FAIL = 2                //连续失败次数阈值
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
@@ -680,10 +681,12 @@ object PicGenManager {
             }
         }
         if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
-        val result = raceFirst(families.map { scope.async { it() } }) { it != null }
-        @Suppress("UNCHECKED_CAST")
-        return result as? Pair<ByteArray, String>
-            ?: throw IllegalStateException("全部生图渠道失败")
+        //整场竞速设上限：任一渠道超时挂起也不再干等，超时即失败（避免转圈无限转）
+        return withTimeoutOrNull(RACE_TIMEOUT_MS) {
+            val result = raceFirst(families.map { scope.async { it() } }) { it != null }
+            @Suppress("UNCHECKED_CAST")
+            result as? Pair<ByteArray, String>
+        } ?: throw IllegalStateException("生图超时(${RACE_TIMEOUT_MS / 1000}s)")
     }
 
     //轮换计数器：NIM 组合起点
@@ -853,7 +856,7 @@ object PicGenManager {
                     "response_format" to "b64_json"
                 )
             )
-            val data = withTimeoutOrNull(300_000L) {
+            val data = withTimeoutOrNull(RACE_TIMEOUT_MS) {
                 postJsonRequest("$base/v1/images/generations", body, null)
             }
             val item = if (data != null) parseImageResponse(data) else null
@@ -875,7 +878,7 @@ object PicGenManager {
                     "batch_size" to 1
                 )
             )
-            val data2 = withTimeoutOrNull(300_000L) {
+            val data2 = withTimeoutOrNull(RACE_TIMEOUT_MS) {
                 postJsonRequest("$base/sdapi/v1/txt2img", body2, null)
             } ?: return null
             val obj = parseJson(data2) ?: return null
