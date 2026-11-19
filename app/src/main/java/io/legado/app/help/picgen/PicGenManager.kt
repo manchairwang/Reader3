@@ -97,6 +97,8 @@ object PicGenManager {
     /**
      * 全渠道探活：omni win/cat/win-local 网关 + pony/qwen 生图服务（本机、tailscale win 机候选）。
      * 能用就用，不能用不提示，仅记调试日志。
+     * 同时判定 tailscale 内网可用性：win/cat/本地生图任一可达视为内网可用 → 内置 key 全量启用；
+     * 完全不可达 → 置 needUserKey，首次生图前要求用户配置 key 才允许生成。
      */
     private suspend fun probeOmniHosts() {
         var winTs = false
@@ -119,8 +121,19 @@ object PicGenManager {
         qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
         PicGenConfig.channelPony = ponyActiveBase != null
         PicGenConfig.channelQwen = qwenActiveBase != null
+        //tailscale 内网可用：win/cat 网关或本地生图服务任一可达 → 内置 key 全量启用
+        val tailscaleOk = winTs || winLocal || cat || ponyActiveBase != null || qwenActiveBase != null
+        internalReachable = tailscaleOk
+        if (tailscaleOk) {
+            needUserKey = false
+            //内网可用：agnes 内置 key 全量启用（用户可随时在设置里关掉）
+            PicGenConfig.channelAgnesCn = true
+            PicGenConfig.channelAgnesCom = true
+            //确保内置 key 已注册进组合健康表（用户可能从未打开过 key 管理窗）
+            registerAllCombos()
+        }
         LogUtils.d(TAG, "渠道探活: omni_win_ts=$winTs omni_win_local=$winLocal omni_cat=$cat " +
-            "pony=$ponyActiveBase qwen=$qwenActiveBase")
+            "pony=$ponyActiveBase qwen=$qwenActiveBase tailscale=$tailscaleOk needUserKey=$needUserKey")
     }
 
     /** 网关可达性判断：用探活缓存值（win-local 也以本轮探活结果为准） */
@@ -262,6 +275,31 @@ object PicGenManager {
     private var ponyActiveBase: String? = null
     @Volatile
     private var qwenActiveBase: String? = null
+
+    //tailscale 内网是否可达（win/cat/本地生图任一可达即 true；内置 key 全量启用的依据）
+    @Volatile
+    private var internalReachable: Boolean = false
+
+    //完全离线时置 true：首次生图前要求用户配置 key（复用 AgnesKeysDialog）
+    @Volatile
+    private var needUserKey: Boolean = false
+
+    /** 生图前是否需要用户先配置 key（tailscale 不可达且未配置任何用户 key） */
+    fun userKeyRequired(): Boolean {
+        if (!needUserKey) return false
+        //用户配置了任一来源 key 即视为已满足（sensenova/nim/agnes 自定义）
+        val hasUserKey = userKeys(PicGenConfig.sensenovaKeysCn).isNotEmpty() ||
+            userKeys(PicGenConfig.sensenovaKeysCom).isNotEmpty() ||
+            userKeys(PicGenConfig.nimKeys).isNotEmpty() ||
+            userKeys(PicGenConfig.agnesKeysCn).isNotEmpty() ||
+            userKeys(PicGenConfig.agnesKeysCom).isNotEmpty()
+        if (hasUserKey) needUserKey = false
+        return !hasUserKey
+    }
+
+    /** 配置窗口回调：无内网时首次生图前弹 AgnesKeysDialog 让用户填 key */
+    @Volatile
+    var onRequestUserKey: (() -> Unit)? = null
 
     // ---- 服务模型发现：/v1/models → 文生图/摘要模型分组（探活周期刷新，检测按钮即时刷新）----
     data class SvcModels(val image: List<String>, val chat: List<String>)
@@ -507,6 +545,20 @@ object PicGenManager {
     private suspend fun genFor(cacheKey: String, pageText: String) {
         if (jobs.containsKey(cacheKey)) return
         if (jobs.size >= MAX_CONCURRENT) return
+        //首次生图前的 key 拦截：tailscale 不可达且无用户 key 时，弹出配置窗口直到填好
+        if (userKeyRequired()) {
+            withContext(Dispatchers.Main) { onRequestUserKey?.invoke() }
+            //等待用户完成配置（最多 3 分钟，期间每 2s 复查是否已配好）
+            var waited = 0
+            while (userKeyRequired() && waited < 180) {
+                kotlinx.coroutines.delay(2_000L)
+                waited += 2
+            }
+            if (userKeyRequired()) {
+                withContext(Dispatchers.Main) { onStatus?.invoke(cacheKey, "需先配置生图 key（设置→图片生成→key 管理）") }
+                return
+            }
+        }
         memCache.get(cacheKey)?.let {
             withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, it, "cache") }
             return

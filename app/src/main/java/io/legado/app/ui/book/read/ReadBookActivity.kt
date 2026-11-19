@@ -76,6 +76,7 @@ import io.legado.app.ui.book.bookmark.BookmarkDialog
 import io.legado.app.ui.book.changesource.ChangeBookSourceDialog
 import io.legado.app.ui.book.changesource.ChangeChapterSourceDialog
 import io.legado.app.ui.book.info.BookInfoActivity
+import io.legado.app.ui.book.read.config.AgnesKeysDialog
 import io.legado.app.ui.book.read.config.AutoReadDialog
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.BG_COLOR
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_COLOR
@@ -1105,6 +1106,14 @@ class ReadBookActivity : BaseReadBookActivity(),
         //中 1/3 单击：与正文一致开菜单（可配置点击区域行为，正文走 ReadView.click）
         picWindow.onCenterTap = {
             if (!menuLayoutIsVisible) showActionMenu()
+        }
+        //tailscale 不可达时，首次生图前弹出 key 管理窗引导配置
+        PicGenManager.onRequestUserKey = {
+            if (supportFragmentManager.findFragmentByTag("agnesKeysDialog") == null &&
+                !isFinishing
+            ) {
+                AgnesKeysDialog().show(supportFragmentManager, "agnesKeysDialog")
+            }
         }
         upPicWindowLayout()
     }
