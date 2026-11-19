@@ -155,11 +155,6 @@ object PicGenManager {
     //生图信息表：cacheKey -> "prompt\nsource"（图片窗口左下角诊断层用）
     private val genInfoCache = ConcurrentHashMap<String, String>()
 
-    //冷却表：路由 key -> 恢复时间戳
-    private val cooldownUntil = ConcurrentHashMap<String, Long>()
-    private val failCount = ConcurrentHashMap<String, Int>()
-    private val routeMutex = Mutex()
-
     // ---- 组合健康管理：每个(供应商, base, token) 一个状态；慢/失败自动下线，指数退避恢复 ----
     data class ComboHealth(
         val siteKey: String,
@@ -175,7 +170,13 @@ object PicGenManager {
         fun isSlow(): Boolean = slowStreak >= COMBO_SLOW_MAX
     }
 
+    //注意：combos 必须声明在 init{registerAllCombos()} 之前（object 属性按声明顺序初始化）
     private val combos = ConcurrentHashMap<String, ComboHealth>()
+
+    //冷却表：路由 key -> 恢复时间戳
+    private val cooldownUntil = ConcurrentHashMap<String, Long>()
+    private val failCount = ConcurrentHashMap<String, Int>()
+    private val routeMutex = Mutex()
 
     //慢判定与恢复重试参数（用户确认：>90s 连 2 次下线；60s 起翻倍封顶 30min）
     private const val COMBO_SLOW_MS = 90_000L
