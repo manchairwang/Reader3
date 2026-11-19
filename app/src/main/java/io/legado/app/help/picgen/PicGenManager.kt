@@ -66,6 +66,9 @@ object PicGenManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
+        //注册全部供应商×token 组合 + 启动恢复探测
+        registerAllCombos()
+        startComboRecoveryLoop()
         //全渠道探活循环：启动即探活一轮；本地渠道(pony/qwen)未启用时 30s 快速重试，
         //全部启用后切回 10 分钟；云端渠道错过一轮也无妨（下轮补充）
         scope.launch {
@@ -143,6 +146,110 @@ object PicGenManager {
     private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val failCount = ConcurrentHashMap<String, Int>()
     private val routeMutex = Mutex()
+
+    // ---- 组合健康管理：每个(供应商, base, token) 一个状态；慢/失败自动下线，指数退避恢复 ----
+    data class ComboHealth(
+        val siteKey: String,
+        val base: String,
+        val token: String,
+        @Volatile var ok: Boolean = true,
+        @Volatile var slowStreak: Int = 0,
+        @Volatile var retryDelayMs: Long = COMBO_RETRY_INIT_MS,
+        @Volatile var nextProbeAt: Long = 0L
+    ) {
+        //健康组合路由 key（与旧冷却表共用一套）
+        val key: String get() = "combo:$base:${token.takeLast(8)}"
+        fun isSlow(): Boolean = slowStreak >= COMBO_SLOW_MAX
+    }
+
+    private val combos = ConcurrentHashMap<String, ComboHealth>()
+
+    //慢判定与恢复重试参数（用户确认：>90s 连 2 次下线；60s 起翻倍封顶 30min）
+    private const val COMBO_SLOW_MS = 90_000L
+    private const val COMBO_SLOW_MAX = 2
+    private const val COMBO_RETRY_INIT_MS = 60_000L
+    private const val COMBO_RETRY_MAX_MS = 30 * 60_000L
+    private const val COMBO_PROBE_INTERVAL_MS = 30_000L   //恢复探测扫描周期
+
+    /** 注册一个组合（启动/新增 key 时调用；已存在则复用） */
+    private fun combo(siteKey: String, base: String, token: String): ComboHealth =
+        combos.getOrPut("$base:${token.takeLast(8)}") { ComboHealth(siteKey, base, token) }
+
+    /** 该组合当前是否可用（未下线且未在退避期） */
+    private fun comboOk(c: ComboHealth): Boolean =
+        c.ok && (c.nextProbeAt == 0L || c.nextProbeAt <= System.currentTimeMillis())
+
+    /** 记录一次成功：清零慢计数与退避 */
+    private fun comboSuccess(c: ComboHealth) {
+        c.slowStreak = 0
+        c.retryDelayMs = COMBO_RETRY_INIT_MS
+        c.ok = true
+    }
+
+    /** 记录一次慢/失败：连慢 COMBO_SLOW_MAX 次 → 下线并安排恢复探测 */
+    private fun comboSlow(c: ComboHealth) {
+        c.slowStreak++
+        if (c.isSlow()) {
+            c.ok = false
+            c.nextProbeAt = System.currentTimeMillis() + c.retryDelayMs
+        }
+    }
+
+    /** 恢复探测成功：立即回到可用列表 */
+    private fun comboRecovered(c: ComboHealth) {
+        c.ok = true
+        c.slowStreak = 0
+        c.retryDelayMs = COMBO_RETRY_INIT_MS
+        c.nextProbeAt = 0L
+    }
+
+    /** 探测失败：翻倍退避（封顶 30min），安排下次探测 */
+    private fun comboProbeFail(c: ComboHealth) {
+        c.retryDelayMs = (c.retryDelayMs * 2).coerceAtMost(COMBO_RETRY_MAX_MS)
+        c.nextProbeAt = System.currentTimeMillis() + c.retryDelayMs
+    }
+
+    /** 启动时全量注册所有供应商×token 组合（生图+摘要统一登记） */
+    private fun registerAllCombos() {
+        //agnes 内置 + 用户自定义
+        for (site in PicGenChannels.AGNES_SITES) {
+            site.tokens.forEach { combo(site.key, site.base, it) }
+            val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
+            userKeys(custom).forEach { combo(site.key, site.base, it) }
+        }
+        //nim / sensenova 用户 key
+        userKeys(PicGenConfig.nimKeys).forEach { combo(PicGenChannels.NIM_SITE.key, PicGenChannels.NIM_SITE.base, it) }
+        for (site in PicGenChannels.SENSENOVA_SITES) {
+            val custom = if (site.key == "sensenova_cn") PicGenConfig.sensenovaKeysCn else PicGenConfig.sensenovaKeysCom
+            userKeys(custom).forEach { combo(site.key, site.base, it) }
+        }
+        //omni 网关
+        for (h in PicGenChannels.OMNI_HOSTS) combo(h.name, h.base, h.token)
+    }
+
+    /** 后台恢复探测循环：扫描下线的组合，到点探测 /v1/models，恢复则回可用列表 */
+    private fun startComboRecoveryLoop() {
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(COMBO_PROBE_INTERVAL_MS)
+                val now = System.currentTimeMillis()
+                for (c in combos.values) {
+                    if (c.ok || c.nextProbeAt > now) continue
+                    try {
+                        val reachable = withTimeoutOrNull(5_000L) {
+                            val req = Request.Builder().url("${c.base}/v1/models")
+                                .header("Authorization", "Bearer ${c.token}")
+                                .build()
+                            okHttpClient.newCall(req).execute().use { it.isSuccessful }
+                        } == true
+                        if (reachable) comboRecovered(c) else comboProbeFail(c)
+                    } catch (e: Exception) {
+                        comboProbeFail(c)
+                    }
+                }
+            }
+        }
+    }
 
     //轮换计数器
     @Volatile
@@ -309,7 +416,8 @@ object PicGenManager {
 
     /**
      * 翻页/加载后调用：重估任务集。
-     * @param pages (stableKey, 生图文字) 列表。stableKey 由调用方给（阅读位置，横竖屏不变）
+     * @param pages (stableKey, 生图文字) 列表。stableKey 由调用方给（阅读位置，横竖屏不变）。
+     * 调用方负责把当前章剩余真实分页 + 后续页一并传入（实现全书预读）。
      */
     fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
         if (!PicGenConfig.windowShow) return
@@ -586,6 +694,9 @@ object PicGenManager {
     private suspend fun chatOnce(base: String, token: String, model: String, prompt: String): String? {
         val rkey = "chat:$base:$model"
         if (!routeAvailable(rkey)) return null
+        val c = combo("chat", base, token)
+        if (!comboOk(c)) return null  //该组合已下线退避,不参与摘要竞速
+        val t0 = System.currentTimeMillis()
         try {
             val body = gson.toJson(
                 mapOf(
@@ -601,11 +712,15 @@ object PicGenManager {
             val text = obj.getAsJsonArray("choices")?.get(0)?.asJsonObject
                 ?.getAsJsonObject("message")?.get("content")?.asString ?: ""
             recordSuccess(rkey)
+            comboSuccess(c)
             return PromptBuilder.extractTags(text)
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
+            comboSlow(c)
             return null
+        } finally {
+            if (System.currentTimeMillis() - t0 >= CHAT_TIMEOUT_MS) comboSlow(c)
         }
     }
 
@@ -699,6 +814,9 @@ object PicGenManager {
     private suspend fun imageOpenai(base: String, token: String, model: String, prompt: String): Pair<ByteArray, String>? {
         val rkey = "img:$base:${token.takeLast(8)}:$model"
         if (!routeAvailable(rkey)) return null
+        val c = combo("openai", base, token)
+        if (!comboOk(c)) return null  //该组合已下线退避,直接不参与本轮竞速
+        val t0 = System.currentTimeMillis()
         return try {
             val body = gson.toJson(
                 mapOf(
@@ -711,14 +829,28 @@ object PicGenManager {
             )
             val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
                 postJsonRequest("$base/v1/images/generations", body, token)
-            } ?: return null
-            val item = parseImageResponse(data) ?: return null
+            }
+            if (data == null) {
+                //超时(>=75s 但 <90s 慢阈值)不立刻下线,交由调用方记录;直接失败冷却
+                recordFailure(rkey)
+                return null
+            }
+            val item = parseImageResponse(data) ?: run {
+                recordFailure(rkey)
+                return null
+            }
             recordSuccess(rkey)
+            comboSuccess(c)
             item.first to model
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
+            comboSlow(c)
             null
+        } finally {
+            //竞速中被取消/慢完成也记一笔：>SLOW_MS 连 COMBO_SLOW_MAX 次下线
+            val cost = System.currentTimeMillis() - t0
+            if (cost >= COMBO_SLOW_MS) comboSlow(c)
         }
     }
 
@@ -846,6 +978,9 @@ object PicGenManager {
     private suspend fun localTxt2Img(base: String, prompt: String): ByteArray? {
         val rkey = "local:$base"
         if (!routeAvailable(rkey)) return null
+        val c = combo("local", base, "")
+        if (!comboOk(c)) return null
+        val t0 = System.currentTimeMillis()
         return try {
             //OpenAI 兼容格式优先
             val body = gson.toJson(
@@ -862,6 +997,7 @@ object PicGenManager {
             val item = if (data != null) parseImageResponse(data) else null
             if (item != null) {
                 recordSuccess(rkey)
+                comboSuccess(c)
                 return item.first
             }
             //sdapi/v1/txt2img 兜底
@@ -880,17 +1016,28 @@ object PicGenManager {
             )
             val data2 = withTimeoutOrNull(RACE_TIMEOUT_MS) {
                 postJsonRequest("$base/sdapi/v1/txt2img", body2, null)
-            } ?: return null
-            val obj = parseJson(data2) ?: return null
+            } ?: run {
+                recordFailure(rkey)
+                return null
+            }
+            val obj = parseJson(data2) ?: run {
+                recordFailure(rkey)
+                return null
+            }
             val b64 = obj.getAsJsonArray("images")?.get(0)?.asString
             if (b64 != null) {
                 recordSuccess(rkey)
+                comboSuccess(c)
                 decodeB64(b64)
             } else null
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
+            comboSlow(c)
             null
+        } finally {
+            //本地专家通常 30-50s；超过慢阈值视为慢，连 COMBO_SLOW_MAX 次下线
+            if (System.currentTimeMillis() - t0 >= COMBO_SLOW_MS) comboSlow(c)
         }
     }
 
@@ -1040,6 +1187,9 @@ object PicGenManager {
     }
 
     fun cachedBitmap(cacheKey: String): Bitmap? = memCache.get(cacheKey)
+
+    /** 生图任务表占用数量（预读放量用） */
+    fun isBusy(threshold: Int): Boolean = jobs.size >= threshold
 
     /** 某页生图信息："提示词\n来源(model@site)"，未记录返回 null（图片窗口诊断层用） */
     fun infoFor(cacheKey: String): String? = genInfoCache[cacheKey]

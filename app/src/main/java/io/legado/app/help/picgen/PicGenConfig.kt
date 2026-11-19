@@ -33,6 +33,11 @@ by appCtx.getSharedPreferences("picgen", Context.MODE_PRIVATE) {
         get() = if (contains(PreferKey.picGenIncludeFullText)) getBoolean(PreferKey.picGenIncludeFullText) else true
         set(value) = putBoolean(PreferKey.picGenIncludeFullText, value)
 
+    //全文预读生成：翻页时把当前章剩余所有页送入生图（缓存复用，跳页自动放弃旧任务）
+    var prefetchWholeBook: Boolean
+        get() = if (contains(PreferKey.picGenPrefetchWholeBook)) getBoolean(PreferKey.picGenPrefetchWholeBook) else false
+        set(value) = putBoolean(PreferKey.picGenPrefetchWholeBook, value)
+
     //竖屏：图片窗口高度占屏幕高度比例（旧默认 0.30 自动升级 0.45）
     var heightRatio: Float
         get() = getFloat(PreferKey.picWindowHeightRatio, 0f)

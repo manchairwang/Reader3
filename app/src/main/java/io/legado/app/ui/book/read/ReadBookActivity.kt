@@ -1176,7 +1176,9 @@ class ReadBookActivity : BaseReadBookActivity(),
     private var currentPicKey: String? = null
 
     /**
-     * 翻页/加载后触发：当前页 + 预读页送入生图管理器
+     * 翻页/加载后触发：当前页 + 全书预读页送入生图管理器。
+     * 预读策略：当前章剩余真实分页全部取来自动生成（与阅读 key 一致，缓存可复用），
+     * 到章末用 nextPage 跨章继续取下一页；跳页时任务由管理器 diff 自动放弃。
      */
     private fun triggerPicGen() = binding.run {
         if (!PicGenConfig.windowShow) return
@@ -1186,11 +1188,26 @@ class ReadBookActivity : BaseReadBookActivity(),
             //当前页 key 用阅读位置（章号+章内字符偏移），横竖屏分页变化不影响
             val curKey = "c${ReadBook.durChapterIndex}@p${ReadBook.durChapterPos}"
             pages.add(curKey to factory.curPage.text)
-            //预读：当前章后 2 页；跨章取下一章首页（用各自页起始位置做 key）
-            val next = factory.nextPage
-            if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
-            val nextPlus = factory.nextPlusPage
-            if (nextPlus.text.isNotBlank()) pages.add(stableKey(nextPlus) to nextPlus.text)
+            if (PicGenConfig.prefetchWholeBook) {
+                //全书预读：当前章剩余真实分页全部取来（curPage 每页 index 递增，页已布局即有效）
+                val ch = readView.currentChapter
+                val pageIndex = ReadBook.durPageIndex
+                if (ch != null && pageIndex >= 0 && pageIndex < ch.pageSize) {
+                    var i = pageIndex + 1
+                    while (i < ch.pageSize && pages.size < PREFETCH_CAP) {
+                        ch.getPage(i)?.let { p ->
+                            if (p.text.isNotBlank()) pages.add(stableKey(p) to p.text)
+                        }
+                        i++
+                    }
+                }
+            } else {
+                //预读：当前章后 2 页；跨章取下一章首页（用各自页起始位置做 key）
+                val next = factory.nextPage
+                if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
+                val nextPlus = factory.nextPlusPage
+                if (nextPlus.text.isNotBlank()) pages.add(stableKey(nextPlus) to nextPlus.text)
+            }
         } catch (e: Exception) {
             LogUtils.d("PicGen", "get page text fail: ${e.message}")
         }
@@ -1876,6 +1893,8 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     companion object {
         const val RESULT_DELETED = 100
+        //全书预读单次上限：一次触发最多追加这么多页，避免打爆并发与内存
+        private const val PREFETCH_CAP = 40
     }
 
 }
