@@ -65,6 +65,9 @@ object PicGenManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 供 UI 层(PicWindowView)启动拼图生成协程 */
+    fun mosaicScope(): CoroutineScope = scope
+
     init {
         //注意：Kotlin object 属性和 init 块按声明顺序执行，此处(文件头部)await 不到靠后的字段，
         //组合注册/恢复循环放到协程内执行——那时所有字段已初始化完成。
@@ -1203,6 +1206,62 @@ object PicGenManager {
         val digest = MessageDigest.getInstance("MD5")
             .digest(text.toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * 拼图背景：取缓存中与当前页"最相关"的 16 张图拼成 4x4。
+     * 相关度 = |章差|*大权重 + |字符位置差|（同章、位置近者优先，跨章靠后）。
+     * @param currentKey 当前页 key（"c{ch}@p{pos}"）
+     * @param offset 轮换偏移：每 30s +1，改变取图起始位置实现背景更替
+     */
+    fun buildMosaic(currentKey: String, offset: Int): Bitmap? {
+        val cur = parseKeyPos(currentKey) ?: return null
+        val files = cacheDir.listFiles { f -> f.extension == "png" } ?: return null
+        val scored = files.mapNotNull { f ->
+            parseKeyPos(f.nameWithoutExtension)?.let { (ch, pos) ->
+                val d = kotlin.math.abs(ch - cur.first) * 1_000_000L + kotlin.math.abs(pos - cur.second)
+                Triple(d, f, ch)
+            }
+        }.sortedBy { it.first }
+        if (scored.isEmpty()) return null
+        val cell = 256
+        val mosaic = Bitmap.createBitmap(cell * 4, cell * 4, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(mosaic)
+        val paint = android.graphics.Paint().apply { isAntiAlias = true; isFilterBitmap = true }
+        for (i in 0 until 16) {
+            val (_, f, _) = scored[(offset * 16 + i) % scored.size]
+            val bmp = decodeScaled(f, cell)
+            if (bmp != null) {
+                val x = (i % 4) * cell
+                val y = (i / 4) * cell
+                canvas.drawBitmap(centerCrop(bmp, cell), x.toFloat(), y.toFloat(), paint)
+                if (bmp !== mosaic) bmp.recycle()
+            }
+        }
+        return mosaic
+    }
+
+    /** 解析 "c{ch}@p{pos}" → (ch, pos) */
+    private fun parseKeyPos(key: String): Pair<Int, Int>? {
+        val m = Regex("""^c(\d+)@p(\d+)$""").find(key) ?: return null
+        return m.groupValues[1].toInt() to m.groupValues[2].toInt()
+    }
+
+    private fun decodeScaled(f: File, size: Int): Bitmap? {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.absolutePath, opts)
+        var sample = 1
+        while (opts.outWidth / (sample * 2) >= size && opts.outHeight / (sample * 2) >= size) sample *= 2
+        val o2 = BitmapFactory.Options().apply { inSampleSize = sample }
+        return BitmapFactory.decodeFile(f.absolutePath, o2)
+    }
+
+    /** 居中裁剪成正方形 */
+    private fun centerCrop(src: Bitmap, size: Int): Bitmap {
+        val s = minOf(src.width, src.height)
+        val x = (src.width - s) / 2
+        val y = (src.height - s) / 2
+        return Bitmap.createBitmap(src, x, y, s, s)
     }
 
     private fun decodeB64(b64: String): ByteArray = Base64.decode(b64, Base64.NO_WRAP)

@@ -4,6 +4,23 @@
     android:layout_height="match_parent"
     android:background="#80000000">
 
+    <!--第0层：缓存拼图背景（首图未就绪时显示，30s 轮换）-->
+    <ImageView
+        android:id="@+id/iv_pic_mosaic"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/pic_window"
+        android:visibility="gone" />
+
+    <!--第1层：半透明白雾，盖在拼图上降低干扰，可看清文字/状态-->
+    <View
+        android:id="@+id/v_mosaic_fog"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99FFFFFF"
+        android:visibility="gone" />
+
     <ImageView
         android:id="@+id/iv_pic"
         android:layout_width="match_parent"

@@ -1229,7 +1229,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             PicGenManager.cachedBitmap(key)?.let {
                 picWindow.setBitmap(it)
                 picWindow.showInfo(PicGenManager.infoFor(key))
-            } ?: picWindow.showLoading()
+            } ?: picWindow.showLoading(key)
         }
         PicGenManager.onVisiblePagesChanged(pages)
     }
