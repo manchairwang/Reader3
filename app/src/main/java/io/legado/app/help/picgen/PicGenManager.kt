@@ -237,6 +237,25 @@ object PicGenManager {
 
     /** key 管理对话框检测：模型发现 + 摘要模型实测，返回结果描述 */
     suspend fun testService(siteKey: String, token: String): String {
+        //候选 key：用户输入的 key 优先，随后轮换该站全部内置 key（agns 免费站常被风控，
+        //第一个 key 403 不代表服务不可用，必须挨个试）
+        val candidateTokens = buildList {
+            if (token.isNotBlank()) add(token)
+            if (siteKey == "agnes_cn" || siteKey == "agnes_com") {
+                addAll(PicGenChannels.AGNES_SITES.first { it.key == siteKey }.tokens)
+            }
+        }.distinct()
+        if (candidateTokens.isEmpty()) return "$siteKey: ✗ 无可用 key"
+        var lastFail: String? = null
+        for (tk in candidateTokens) {
+            val r = testServiceOnce(siteKey, tk)
+            if (r.contains("✓")) return r
+            lastFail = r
+        }
+        return lastFail ?: "$siteKey: ✗ 无可用 key"
+    }
+
+    private suspend fun testServiceOnce(siteKey: String, token: String): String {
         val (base, fallbackChat) = when (siteKey) {
             "agnes_cn" -> PicGenChannels.AGNES_SITES.first { it.key == "agnes_cn" }.base to PicGenChannels.AGNES_CHAT_MODELS
             "agnes_com" -> PicGenChannels.AGNES_SITES.first { it.key == "agnes_com" }.base to PicGenChannels.AGNES_CHAT_MODELS

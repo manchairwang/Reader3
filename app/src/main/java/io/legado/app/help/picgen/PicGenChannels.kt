@@ -77,9 +77,12 @@ object PicGenChannels {
         "stability-ai/stable-diffusion-3_5-large"
     )
     val NIM_CHAT_MODELS = listOf(
-        "meta/llama-3.3-70b-instruct",
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-        "step-5-preview"
+        "z-ai/glm-5.3-flash",
+        "google/gemma-4-31b-it",
+        "minimaxai/minimax-m3.1-flash",
+        "stepfun-ai/step-5-preview",
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "google/gemma-3-12b-it"
     )
 
     //omniroute 网关：tailscale win/cat + 本机
