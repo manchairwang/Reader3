@@ -66,12 +66,13 @@ object PicGenManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     init {
-        //注册全部供应商×token 组合 + 启动恢复探测
-        registerAllCombos()
-        startComboRecoveryLoop()
-        //全渠道探活循环：启动即探活一轮；本地渠道(pony/qwen)未启用时 30s 快速重试，
-        //全部启用后切回 10 分钟；云端渠道错过一轮也无妨（下轮补充）
+        //注意：Kotlin object 属性和 init 块按声明顺序执行，此处(文件头部)await 不到靠后的字段，
+        //组合注册/恢复循环放到协程内执行——那时所有字段已初始化完成。
         scope.launch {
+            registerAllCombos()
+            startComboRecoveryLoop()
+            //全渠道探活循环：启动即探活一轮；本地渠道(pony/qwen)未启用时 30s 快速重试，
+            //全部启用后切回 10 分钟；云端渠道错过一轮也无妨（下轮补充）
             while (true) {
                 probeOmniHosts()
                 refreshSvcModels()
