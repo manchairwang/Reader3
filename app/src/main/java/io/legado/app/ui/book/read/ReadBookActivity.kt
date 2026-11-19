@@ -1207,8 +1207,10 @@ class ReadBookActivity : BaseReadBookActivity(),
                 val ch = readView.currentChapter
                 val pageIndex = ReadBook.durPageIndex
                 if (ch != null && pageIndex >= 0 && pageIndex < ch.pageSize) {
+                    //无论何种模式, 最多提前生成当前页后面 3 页
+                    val end = minOf(ch.pageSize, pageIndex + 1 + AHEAD_LIMIT)
                     var i = pageIndex + 1
-                    while (i < ch.pageSize && pages.size < PREFETCH_CAP) {
+                    while (i < end && pages.size < PREFETCH_CAP) {
                         ch.getPage(i)?.let { p ->
                             if (p.text.isNotBlank()) pages.add(stableKey(p) to p.text)
                         }
@@ -1216,7 +1218,7 @@ class ReadBookActivity : BaseReadBookActivity(),
                     }
                 }
             } else {
-                //预读：当前章后 2 页；跨章取下一章首页（用各自页起始位置做 key）
+                //预读：当前章后 3 页；跨章取下一章首页（用各自页起始位置做 key）
                 val next = factory.nextPage
                 if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
                 val nextPlus = factory.nextPlusPage
@@ -1909,6 +1911,7 @@ class ReadBookActivity : BaseReadBookActivity(),
         const val RESULT_DELETED = 100
         //全书预读单次上限：一次触发最多追加这么多页，避免打爆并发与内存
         private const val PREFETCH_CAP = 40
+    private const val AHEAD_LIMIT = 3   //最多提前生成当前页后面 3 页
     }
 
 }
