@@ -121,29 +121,27 @@ object PicGenManager {
         }
         PicGenConfig.omniWinReachable = winTs || winLocal
         PicGenConfig.omniCatReachable = cat
-        //cat 可达 → 生图主力走 cat 的 mybestvision，win 网关不参与生图
-        //cat 不可达 → win/cat 网关全部不参与生图（云端只用用户 key）
-        PicGenConfig.channelOmniWin = false
+        //win/cat 网关任一可达即参与生图(mybestvision)，都可用则都启用
+        PicGenConfig.channelOmniWin = winTs || winLocal
         PicGenConfig.channelOmniCat = cat
         //pony/qwen：候选地址逐个探活，取首个可达的作为活跃地址
         ponyActiveBase = PicGenChannels.PONY_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
         qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
         PicGenConfig.channelPony = ponyActiveBase != null
         PicGenConfig.channelQwen = qwenActiveBase != null
-        //内置 key 启用依据: 仅 cat 可达时启用 agnes 内置 key;
-        //win/qwen/pony 可达只代表本地生图可用(本身参与竞速), 不启用内置云端 key
-        val catOk = cat
-        internalReachable = catOk
-        if (catOk) {
+        //win/cat 网关任一可达即视为内网可用（探活结果缓存，供诊断用）
+        val gatewayOk = winTs || winLocal || cat
+        internalReachable = gatewayOk
+        if (gatewayOk) {
             needUserKey = false
-            //cat 可达: 生图走 cat 的 mybestvision, 禁止直接访问 agnes(省流量防风控);
+            //win/cat 可达: 生图走 win/cat 的 mybestvision, 禁止直接访问 agnes(省流量防风控);
             //其它用户 key 渠道(sensenova/nim/自定义agnes)照常可用
             PicGenConfig.channelAgnesCn = false
             PicGenConfig.channelAgnesCom = false
             //确保内置 key 已注册进组合健康表（用户可能从未打开过 key 管理窗）
             registerAllCombos()
         } else {
-            //cat 不可达: 不使用内置 key, 云端只用用户自己配置的 key; win/cat 网关也不参与
+            //win/cat 均不可达: 不使用内置 key, 云端只用用户自己配置的 key; win/cat 网关也不参与
             PicGenConfig.channelAgnesCn = false
             PicGenConfig.channelAgnesCom = false
             //无本地生图渠道(qwen 在 win 上, 任何时候可达都算可用)且无用户 key 时,
@@ -151,7 +149,7 @@ object PicGenManager {
             needUserKey = ponyActiveBase == null && qwenActiveBase == null
         }
         LogUtils.d(TAG, "渠道探活: omni_win_ts=$winTs omni_win_local=$winLocal omni_cat=$cat " +
-            "pony=$ponyActiveBase qwen=$qwenActiveBase builtinKeys=$catOk needUserKey=$needUserKey")
+            "pony=$ponyActiveBase qwen=$qwenActiveBase builtinKeys=$gatewayOk needUserKey=$needUserKey")
     }
 
     /** 网关可达性判断：用探活缓存值（win-local 也以本轮探活结果为准） */
@@ -295,18 +293,20 @@ object PicGenManager {
     @Volatile
     private var qwenActiveBase: String? = null
 
-    //tailscale 内网是否可达（win/cat/本地生图任一可达即 true；内置 key 全量启用的依据）
+    //tailscale 内网是否可达（win/cat 网关任一可达即 true；诊断用缓存）
     @Volatile
-    private var internalReachable: Boolean = false
+    var internalReachable: Boolean = false
 
     //完全离线时置 true：首次生图前要求用户配置 key（复用 AgnesKeysDialog）
     @Volatile
     private var needUserKey: Boolean = false
 
-    /** 生图前是否需要用户先配置 key（cat 不可达、无本地生图渠道且未配置任何用户 key） */
+    /** 生图前是否需要用户先配置 key（win/cat 网关和本地生图均不可用且未配置任何用户 key） */
     fun userKeyRequired(): Boolean {
-        //cat 可达(内置 key 可用)或有本地生图渠道时不要求
-        if (internalReachable || PicGenConfig.channelPony || PicGenConfig.channelQwen) return false
+        //win/cat 网关可达(生图走 mybestvision)或有本地生图渠道时不要求
+        if (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat ||
+            PicGenConfig.channelPony || PicGenConfig.channelQwen
+        ) return false
         //用户配置了任一来源 key 即视为已满足（sensenova/nim/agnes 自定义）
         val hasUserKey = userKeys(PicGenConfig.sensenovaKeysCn).isNotEmpty() ||
             userKeys(PicGenConfig.sensenovaKeysCom).isNotEmpty() ||
