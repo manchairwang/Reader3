@@ -78,15 +78,45 @@ object PicGenManager {
         scope.launch {
             registerAllCombos()
             startComboRecoveryLoop()
-            //全渠道探活循环：启动即探活一轮；本地渠道(pony/qwen)未启用时 30s 快速重试，
-            //全部启用后切回 10 分钟；云端渠道错过一轮也无妨（下轮补充）
+            startRetryLoop()
+            //全渠道探活循环(自动重试 win/cat/tailscale/本地模型):
+            //内网断链或本地渠道缺失时 30s 快速重试; 全部健康后 2min 慢扫
+            //模型发现(svcModels)带 5min 节流, 不随探活频率打满 agnes 限流额度
             while (true) {
                 if (PicGenConfig.windowShow) {
                     probeOmniHosts()
                     refreshSvcModels()
                 }
-                val needFast = !PicGenConfig.channelPony || !PicGenConfig.channelQwen
-                kotlinx.coroutines.delay(if (needFast) 30_000L else 10 * 60 * 1000L)
+                val healthy = internalReachable &&
+                    (PicGenConfig.channelQwen || PicGenConfig.channelPony || PicGenConfig.channelOmniCat)
+                kotlinx.coroutines.delay(if (healthy) 120_000L else 30_000L)
+            }
+        }
+    }
+
+    /**
+     * 失败页定时重试：每 30s 扫描最近可见页集中未就绪、无任务且上次失败已超过
+     * 退避时间(60s)的页, 重新排队生成——阅读中"没图的页"自动补图。
+     * 渠道全冷却时 genFor 秒回失败(不计耗时样本), 下一轮重试继续等。
+     */
+    private var lastPages: List<Pair<String, String>> = emptyList()
+    private val lastFailAt = ConcurrentHashMap<String, Long>()
+    private const val RETRY_BACKOFF_MS = 60_000L
+    private fun startRetryLoop() {
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000L)
+                if (!PicGenConfig.windowShow) continue
+                val pages = lastPages
+                if (pages.isEmpty()) continue
+                val now = System.currentTimeMillis()
+                for ((key, text) in pages) {
+                    if (isReady(key)) { lastFailAt.remove(key); continue }
+                    if (jobs.containsKey(key)) continue
+                    val failAt = lastFailAt[key] ?: 0L
+                    if (now - failAt < RETRY_BACKOFF_MS) continue
+                    genFor(key, text)
+                }
             }
         }
     }
@@ -285,6 +315,8 @@ object PicGenManager {
                 for (c in combos.values) {
                     if (c.ok || c.nextProbeAt > now) continue
                     try {
+                        //探测也过 agnes 限流闸(恢复循环会对下线组合逐个探测, 不闸会突破 8/min)
+                        rateGate("${c.base}/v1/models")
                         val reachable = withTimeoutOrNull(5_000L) {
                             val req = Request.Builder().url("${c.base}/v1/models")
                                 .header("Authorization", "Bearer ${c.token}")
@@ -366,6 +398,8 @@ object PicGenManager {
     private suspend fun discoverModels(base: String, token: String): ModelsDiscovery {
         return try {
             var code: Int? = null
+            //agnes 的 /v1/models 同样计入每分钟 8 请求限额
+            rateGate("$base/v1/models")
             val data = withTimeoutOrNull(15_000L) {
                 val req = Request.Builder().url("$base/v1/models")
                     .header("Authorization", "Bearer $token")
@@ -398,8 +432,14 @@ object PicGenManager {
 
     /** 探活周期刷新所有用户服务的模型清单（agnes 用户 key；sensenova/nim 用户 key）
      *  规则: cat 可达时不直连 agnes(生图走 cat 的 mybestvision, 模型发现也不必打 agnes);
-     *  cat 不可达时 agnes 仅用用户自定义 key(不用内置 key) */
+     *  cat 不可达时 agnes 仅用用户自定义 key(不用内置 key)。
+     *  节流: 缓存 5 分钟内有效不重发——探活 30s 一轮时模型发现不再消耗限流额度 */
+    @Volatile
+    private var lastSvcRefreshAt = 0L
     private suspend fun refreshSvcModels() {
+        val now = System.currentTimeMillis()
+        if (now - lastSvcRefreshAt < 5 * 60_000L && svcCache.isNotEmpty()) return
+        lastSvcRefreshAt = now
         val targets = ArrayList<Triple<String, String, String>>() //siteKey, base, token
         if (!PicGenConfig.omniCatReachable) {
             //仅用户自定义 agnes key 参与发现
@@ -523,14 +563,15 @@ object PicGenManager {
             .map { (key, text) -> key to text }
             .filter { it.second.length >= 20 }
         if (cleaned.isEmpty()) return
-        //稀疏生成: 出图比翻页慢时按步长隔 N 页生成 1 张(当前页始终参与),
-        //避免每页任务都排队超时, 一张也等不到
+        //稀疏生成: 出图比翻页慢时按步长隔 N 页生成 1 张(锚点 = 距离为 stride 整数倍的页),
+        //当前页始终参与; 避免每页任务都排队超时, 一张也等不到
         val stride = sparseStride()
         val sparse = if (stride <= 1) cleaned else {
-            //pages[0] 是当前页, 其后按 index % stride == 1 取(即后第 1, 1+stride, 1+2*stride…页)
-            cleaned.filterIndexed { i, _ -> i == 0 || (i - 1) % stride == 0 }
+            //i 是列表位置=与当前页的距离: 取当前页(0)与距离为 stride, 2*stride… 的锚点页
+            cleaned.filterIndexed { i, _ -> i == 0 || i % stride == 0 }
         }
         if (sparse.isEmpty()) return
+        lastPages = sparse
         scope.launch {
             val keys = sparse.map { it.first }.toSet()
             //diff：停掉不再需要的任务
@@ -706,6 +747,7 @@ object PicGenManager {
                 file.writeBytes(bytes)
                 memCache.put(cacheKey, bmp)
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
+                lastFailAt.remove(cacheKey)
             } catch (e: Exception) {
                 //失败也记耗时让降档拿到慢信号——但渠道全冷却的秒回失败不算生图慢, 不记录:
                 //ms 级失败样本会把均值拉低, 误判"很快"反而排满任务, 恶性循环
@@ -714,6 +756,8 @@ object PicGenManager {
                     if (cost >= 5_000L) recordGenTime(cost, "失败")
                 }
                 if (e !is kotlinx.coroutines.CancellationException) {
+                    //失败退避: 记录失败时间, 定时重试循环在退避期后自动补图
+                    lastFailAt[cacheKey] = System.currentTimeMillis()
                     val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道: " +
                         "agnes_cn=${PicGenConfig.channelAgnesCn} agnes_com=${PicGenConfig.channelAgnesCom} " +
                         "omni_win=${PicGenConfig.channelOmniWin} omni_cat=${PicGenConfig.channelOmniCat} " +

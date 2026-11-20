@@ -1207,8 +1207,9 @@ class ReadBookActivity : BaseReadBookActivity(),
                 val ch = readView.currentChapter
                 val pageIndex = ReadBook.durPageIndex
                 if (ch != null && pageIndex >= 0 && pageIndex < ch.pageSize) {
-                    //无论何种模式, 最多提前生成当前页后面 3 页
-                    val end = minOf(ch.pageSize, pageIndex + 1 + AHEAD_LIMIT)
+                    //窗口随稀疏步长扩展: 锚点页(距离=步长整倍数)必须在窗口内才会被提前生成
+                    val window = maxOf(AHEAD_LIMIT, 2 * PicGenManager.sparseStride())
+                    val end = minOf(ch.pageSize, pageIndex + 1 + window)
                     var i = pageIndex + 1
                     while (i < end && pages.size < PREFETCH_CAP) {
                         ch.getPage(i)?.let { p ->
