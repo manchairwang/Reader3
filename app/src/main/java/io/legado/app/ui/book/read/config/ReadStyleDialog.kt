@@ -115,6 +115,7 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
     private fun initViewEvent() = binding.run {
         cbPicWindow.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.windowShow = isChecked
+            if (!isChecked) io.legado.app.help.picgen.PicGenManager.shutdownAll()
             (activity as? ReadBookActivity)?.onPicConfigChanged()
         }
         cbPicWindowShowInfo.onCheckedChangeListener = { _, isChecked ->

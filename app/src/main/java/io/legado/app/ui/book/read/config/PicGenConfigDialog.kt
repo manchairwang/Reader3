@@ -50,6 +50,7 @@ class PicGenConfigDialog : BaseDialogFragment(R.layout.dialog_pic_gen_config) {
     private fun initView() = binding.run {
         cbPicWindowShow.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.windowShow = isChecked
+            if (!isChecked) io.legado.app.help.picgen.PicGenManager.shutdownAll()
         }
         cbPicWindowShowInfo.onCheckedChangeListener = { _, isChecked ->
             PicGenConfig.showInfo = isChecked

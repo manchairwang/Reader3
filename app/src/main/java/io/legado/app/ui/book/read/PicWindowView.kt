@@ -98,6 +98,7 @@ class PicWindowView @JvmOverloads constructor(
         btnClose.setOnClickListener {
             PicGenConfig.windowShow = false
             visibility = GONE
+            io.legado.app.help.picgen.PicGenManager.shutdownAll()
             onClose?.invoke()
         }
         //点击错误/状态文字：复制到剪贴板
