@@ -304,6 +304,9 @@ object PicGenManager {
     @Volatile
     private var agnesRR = 0
 
+    //omni 同上游归一并发闸：cat(win) 的域名/IP 双候选视为同一服务器, 各限 2 并发
+    private val omniUpstreamSemaphores = ConcurrentHashMap<String, Semaphore>()
+
     //pony/qwen 探活后的活跃地址（null 表示全部不可达）
     @Volatile
     private var ponyActiveBase: String? = null
@@ -1137,6 +1140,11 @@ object PicGenManager {
     ): Pair<ByteArray, String>? {
         val rkey = "omni:$hostName:$model"
         if (!routeAvailable(rkey)) return null
+        //同上游归一闸：cat 的域名/IP 双候选、win 的域名/本机双候选是同一台服务器,
+        //按 hostName 归一限 2 并发——否则双候选并发翻倍, 慢模型占满闸会堵死快模型
+        val gate = omniUpstreamSemaphores.getOrPut(
+            if (hostName == "win-local") "win" else hostName
+        ) { Semaphore(2) }
         return try {
             val body = gson.toJson(
                 mapOf(
@@ -1147,8 +1155,10 @@ object PicGenManager {
                     "response_format" to "b64_json"
                 )
             )
-            val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
-                postJsonRequest("$base/v1/images/generations", body, tk)
+            val data = gate.withPermit {
+                withTimeoutOrNull(IMG_TIMEOUT_MS) {
+                    postJsonRequest("$base/v1/images/generations", body, tk)
+                }
             } ?: throw IllegalStateException("超时")
             val item = parseImageResponse(data)
                 ?: throw IllegalStateException("响应无 b64_json 也无 url")
@@ -1245,11 +1255,46 @@ object PicGenManager {
         return serverSemaphores.getOrPut(host) { Semaphore(2) }
     }
 
+    //agnes 限流：.cn/.com 是两个不同服务器, 各自最多 2 并发(信号闸)且每分钟 ≤8 个请求(滑动窗口)
+    private const val AGNES_RATE_PER_MIN = 8
+    private val agnesRequestTimes = ConcurrentHashMap<String, ArrayDeque<Long>>()
+    private fun isAgnesHost(url: String): Boolean = try {
+        (java.net.URI(url).host ?: "").contains("agnes-ai")
+    } catch (e: Exception) {
+        false
+    }
+
+    private suspend fun rateGate(url: String) {
+        if (!isAgnesHost(url)) return
+        val host = try {
+            java.net.URI(url).host ?: url
+        } catch (e: Exception) {
+            url
+        }
+        val q = agnesRequestTimes.getOrPut(host) { ArrayDeque() }
+        while (true) {
+            val wait: Long
+            synchronized(q) {
+                val now = System.currentTimeMillis()
+                while (q.isNotEmpty() && now - q.first() > 60_000L) q.removeFirst()
+                wait = if (q.size < AGNES_RATE_PER_MIN) {
+                    q.addLast(now)
+                    0L
+                } else {
+                    60_000L - (now - q.first()) + 200L
+                }
+            }
+            if (wait <= 0L) return
+            kotlinx.coroutines.delay(wait)
+        }
+    }
+
     private suspend fun postJsonRequest(url: String, json: String, token: String?): String {
         val builder = Request.Builder().url(url)
         builder.postJson(json)
         if (token != null) builder.header("Authorization", "Bearer $token")
         val request = builder.build()
+        rateGate(url)
         semaphoreFor(url).withPermit {
             okHttpClient.newBuilder()
                 .callTimeout(IMG_TIMEOUT_MS, TimeUnit.MILLISECONDS)
