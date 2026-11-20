@@ -92,8 +92,11 @@ object PicGenChannels {
         OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29")
     )
 
-    //omniroute 生图模型
-    val OMNI_IMAGE_MODELS = listOf("mybestvision")
+    //omniroute 生图模型：schnell 实测 4-6s 出图，mybestvision 实测 ~105s；快模型在前
+    val OMNI_IMAGE_MODELS = listOf(
+        "nvidia/black-forest-labs/flux.1-schnell",
+        "mybestvision"
+    )
 
     //omniroute 优先提示词 combo
     val PREFERRED_CHAT_COMBOS = listOf("mybestfast", "mygoodfast")

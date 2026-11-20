@@ -47,9 +47,9 @@ object PicGenManager {
 
     private const val TAG = "PicGenManager"
     private val gson = Gson()
-    private const val IMG_TIMEOUT_MS = 75_000L   //单次生图请求上限(原180s过长,挂起请求会让用户干等)
+    private const val IMG_TIMEOUT_MS = 110_000L  //单次生图请求上限(mybestvision 实测 105s)
     private const val CHAT_TIMEOUT_MS = 60_000L
-    private const val RACE_TIMEOUT_MS = 100_000L //整场竞速上限(超时即判失败,不再无限转圈)
+    private const val RACE_TIMEOUT_MS = 115_000L //整场竞速上限(超时即判失败,不再无限转圈)
     private const val COOLDOWN_SEC = 45L          //连续失败冷却
     private const val MAX_FAIL = 2                //连续失败次数阈值
     private const val PEEK_PAGES = 2              //预读页数：当前页 + 后 2 页
@@ -58,7 +58,8 @@ object PicGenManager {
     private const val PROMPT_MAX = 3000         //生图提示词上限（含当前页全文，远超旧 900）
 
     //动态分辨率档位：综合就绪度+耗时决策（decideSize）
-    private const val LOW_SIZE = "512x512"
+    //注意: cat 网关 schnell 仅支持 >=768 的尺寸(512/576/640 均 422), 下限即 768
+    private const val LOW_SIZE = "768x768"
     private const val BASE_SIZE = "768x768"
     private const val HIGH_SIZE = "1024x1024"
     private const val FAST_MS = 2_000L    //耗时≤2s 视为足够快
@@ -302,8 +303,6 @@ object PicGenManager {
     //轮换计数器
     @Volatile
     private var agnesRR = 0
-    @Volatile
-    private var omniRR = 0
 
     //pony/qwen 探活后的活跃地址（null 表示全部不可达）
     @Volatile
@@ -661,11 +660,14 @@ object PicGenManager {
             }
         }
         val job = scope.launch {
+            var timing = false
+            var t0 = 0L
             try {
                 status(cacheKey, "生成提示词…")
                 val prompt = buildPrompt(pageText)
                 status(cacheKey, "生成图片…")
-                val t0 = System.currentTimeMillis()
+                t0 = System.currentTimeMillis()
+                timing = true
                 val (bytes, source) = generateImage(prompt)
                 if (isBlackImage(bytes)) {
                     throw IllegalStateException("生图返回全黑图")
@@ -678,6 +680,10 @@ object PicGenManager {
                 memCache.put(cacheKey, bmp)
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
             } catch (e: Exception) {
+                //失败也记耗时(超时按 RACE_TIMEOUT_MS)：让降档决策拿到慢信号，不能只靠成功样本
+                if (e !is kotlinx.coroutines.CancellationException && timing) {
+                    recordGenTime(System.currentTimeMillis() - t0, "失败")
+                }
                 if (e !is kotlinx.coroutines.CancellationException) {
                     val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道: " +
                         "agnes_cn=${PicGenConfig.channelAgnesCn} agnes_com=${PicGenConfig.channelAgnesCom} " +
@@ -1084,48 +1090,50 @@ object PicGenManager {
     }
 
     private suspend fun imageOmniroute(prompt: String): Pair<ByteArray, String>? {
-        val combos = ArrayList<Triple<String, String, String>>() //base, token, hostName
+        val tasks = ArrayList<suspend () -> Pair<ByteArray, String>?>()
         for (host in PicGenChannels.OMNI_HOSTS) {
             val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
             if (!chOn || !hostReachable(host)) continue
             for (m in PicGenChannels.OMNI_IMAGE_MODELS) {
-                combos.add(Triple(host.base, host.token, host.name))
+                tasks.add {
+                    omniOnce(host.base, host.token, host.name, m, prompt)
+                }
             }
         }
-        if (combos.isEmpty()) return null
-        var lastErr: String? = null
-        //轮换顺序尝试（与 LayaAir 一致：失败冷却跳过）
-        for (k in combos.indices) {
-            val (base, tk, hostName) = combos[(omniRR + k) % combos.size]
-            val model = PicGenChannels.OMNI_IMAGE_MODELS[(k + omniRR) % PicGenChannels.OMNI_IMAGE_MODELS.size]
-            val rkey = "omni:$hostName:$model"
-            if (!routeAvailable(rkey)) continue
-            try {
-                val body = gson.toJson(
-                    mapOf(
-                        "model" to model,
-                        "prompt" to prompt.take(PROMPT_MAX),
-                        "n" to 1,
-                        "size" to dynamicSizePx,
-                        "response_format" to "b64_json"
-                    )
+        if (tasks.isEmpty()) return null
+        @Suppress("UNCHECKED_CAST")
+        return raceFirst(tasks.map { scope.async { it() } }) { it != null } as? Pair<ByteArray, String>
+    }
+
+    /** 单个 omni host×model 生图：失败记冷却，成功记 rkey+轮换 */
+    private suspend fun omniOnce(
+        base: String, tk: String, hostName: String, model: String, prompt: String
+    ): Pair<ByteArray, String>? {
+        val rkey = "omni:$hostName:$model"
+        if (!routeAvailable(rkey)) return null
+        return try {
+            val body = gson.toJson(
+                mapOf(
+                    "model" to model,
+                    "prompt" to prompt.take(PROMPT_MAX),
+                    "n" to 1,
+                    "size" to dynamicSizePx,
+                    "response_format" to "b64_json"
                 )
-                val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
-                    postJsonRequest("$base/v1/images/generations", body, tk)
-                } ?: throw IllegalStateException("超时")
-                val item = parseImageResponse(data)
-                    ?: throw IllegalStateException("响应无 b64_json 也无 url")
-                recordSuccess(rkey)
-                omniRR = (omniRR + k + 1) % combos.size
-                return item.first to "${model}@${hostName}"
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                recordFailure(rkey)
-                lastErr = e.message
-            }
+            )
+            val data = withTimeoutOrNull(IMG_TIMEOUT_MS) {
+                postJsonRequest("$base/v1/images/generations", body, tk)
+            } ?: throw IllegalStateException("超时")
+            val item = parseImageResponse(data)
+                ?: throw IllegalStateException("响应无 b64_json 也无 url")
+            recordSuccess(rkey)
+            item.first to "${model}@${hostName}"
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            recordFailure(rkey)
+            LogUtils.d(TAG, "omni fail: $hostName $model ${e.message}")
+            null
         }
-        if (lastErr != null) LogUtils.d(TAG, "omni fail: $lastErr")
-        return null
     }
 
     private suspend fun localTxt2Img(base: String, prompt: String): ByteArray? {
