@@ -87,9 +87,9 @@ object PicGenChannels {
 
     //omniroute 网关：tailscale win/cat + 本机
     val OMNI_HOSTS = listOf(
-        OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-d5e5f6-932e7e52"),
-        OmniHost("win-local", "http://localhost:20128", "sk-4a9487328faacff4-d5e5f6-932e7e52"),
-        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-3b1b80865d32ec86-fe3da1-1afe5927")
+        OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("win-local", "http://localhost:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29")
     )
 
     //omniroute 生图模型

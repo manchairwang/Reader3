@@ -88,13 +88,13 @@ object PicGenManager {
         }
     }
 
-    /** 探测一个 HTTP 地址：任何响应（含 4xx/5xx）都视为服务存在；连接失败/超时视为不可达 */
+    /** 探测一个 HTTP 地址：任何响应（含 5xx）都视为服务存在；401/403 为 key 无效，生图同样会失败，视为不可达 */
     private suspend fun probeHttp(url: String, token: String?): Boolean {
         return try {
             withTimeoutOrNull(8_000L) {
                 val builder = Request.Builder().url(url)
                 if (token != null) builder.header("Authorization", "Bearer $token")
-                okHttpClient.newCall(builder.build()).execute().use { true }
+                okHttpClient.newCall(builder.build()).execute().use { it.code !in 401..403 }
             } ?: false
         } catch (e: Exception) {
             false
@@ -1117,12 +1117,16 @@ object PicGenManager {
         if (!comboOk(c)) return null
         val t0 = System.currentTimeMillis()
         return try {
-            //OpenAI 兼容格式优先
+            //OpenAI 兼容格式优先: sdcpp 系服务不认 size/response_format 而用默认超大尺寸导致超时,
+            //直接发 width/height(steps 省时间)——OpenAI 兼容层通常也容忍这些字段
+            val px = dynamicSizePx.split("x").let { if (it.size == 2) it[0].toInt() else 768 }
             val body = gson.toJson(
                 mapOf(
                     "prompt" to prompt,
                     "n" to 1,
-                    "size" to dynamicSizePx,
+                    "width" to px,
+                    "height" to px,
+                    "steps" to 20,
                     "response_format" to "b64_json"
                 )
             )
