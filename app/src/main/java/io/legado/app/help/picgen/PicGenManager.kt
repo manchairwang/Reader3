@@ -704,9 +704,11 @@ object PicGenManager {
                 memCache.put(cacheKey, bmp)
                 withContext(Dispatchers.Main) { onImageReady?.invoke(cacheKey, bmp, source) }
             } catch (e: Exception) {
-                //失败也记耗时(超时按 RACE_TIMEOUT_MS)：让降档决策拿到慢信号，不能只靠成功样本
+                //失败也记耗时让降档拿到慢信号——但渠道全冷却的秒回失败不算生图慢, 不记录:
+                //ms 级失败样本会把均值拉低, 误判"很快"反而排满任务, 恶性循环
                 if (e !is kotlinx.coroutines.CancellationException && timing) {
-                    recordGenTime(System.currentTimeMillis() - t0, "失败")
+                    val cost = System.currentTimeMillis() - t0
+                    if (cost >= 5_000L) recordGenTime(cost, "失败")
                 }
                 if (e !is kotlinx.coroutines.CancellationException) {
                     val detail = "生图失败: ${e.message}\n页: ${pageText.take(50)}…\n渠道: " +
@@ -1223,6 +1225,7 @@ object PicGenManager {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
             comboSlow(c)
+            LogUtils.d(TAG, "local fail: $base ${System.currentTimeMillis() - t0}ms ${e.message}")
             null
         } finally {
             //本地专家通常 30-50s；超过慢阈值视为慢，连 COMBO_SLOW_MAX 次下线

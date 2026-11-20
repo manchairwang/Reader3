@@ -85,11 +85,13 @@ object PicGenChannels {
         "google/gemma-3-12b-it"
     )
 
-    //omniroute 网关：tailscale win/cat + 本机
+    //omniroute 网关: cat 域名+tailscale IP 双候选(部分安卓 ROM MagicDNS 域名解析不稳, IP 直连兜底)
     val OMNI_HOSTS = listOf(
         OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("win", "http://100.117.227.114:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
         OmniHost("win-local", "http://localhost:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
-        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29")
+        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29"),
+        OmniHost("cat", "http://100.64.173.106:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29")
     )
 
     //omniroute 生图模型：schnell 实测 4-6s 出图，mybestvision 实测 ~105s；快模型在前
