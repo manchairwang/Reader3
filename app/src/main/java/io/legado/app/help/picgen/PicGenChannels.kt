@@ -77,12 +77,9 @@ object PicGenChannels {
         "stability-ai/stable-diffusion-3_5-large"
     )
     val NIM_CHAT_MODELS = listOf(
-        "z-ai/glm-5.3-flash",
-        "google/gemma-4-31b-it",
-        "minimaxai/minimax-m3.1-flash",
-        "stepfun-ai/step-5-preview",
-        "nvidia/nemotron-3.5-lightning-30b-a3b",
-        "google/gemma-3-12b-it"
+        "nvidia/mistralai/mistral-large-4-1t-a52b",
+        "nvidia/nvidia/nemotron-3.5-bolt-e4b",
+        "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b"
     )
 
     //omniroute 网关: cat 域名+tailscale IP 双候选(部分安卓 ROM MagicDNS 域名解析不稳, IP 直连兜底)
