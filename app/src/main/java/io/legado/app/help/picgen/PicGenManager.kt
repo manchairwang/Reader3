@@ -779,8 +779,8 @@ object PicGenManager {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
         }
-        //agnes 文本模型（仅用户自定义 key；cat 可达时不允许直连 agnes）
-        if (!PicGenConfig.omniCatReachable) {
+        //agnes 文本模型（仅用户自定义 key；内网 win/cat 可达时不允许直连 agnes）
+        if (!internalReachable) {
             for (site in PicGenChannels.AGNES_SITES) {
                 val tk = userKeys(if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom)
                     .firstOrNull() ?: continue
@@ -890,8 +890,9 @@ object PicGenManager {
     // ---- 生图：agnes/sensenova/NIM/omni 多族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
-        //agnes 族
-        if (PicGenConfig.channelAgnesCn || PicGenConfig.channelAgnesCom) {
+        //agnes 族：非内网用用户自定义 key；内网(win/cat 可达)禁直连 agnes
+        val userAgnesKeys = userKeys(PicGenConfig.agnesKeysCn).isNotEmpty() || userKeys(PicGenConfig.agnesKeysCom).isNotEmpty()
+        if (!internalReachable && userAgnesKeys) {
             families.add { imageAgnes(prompt) }
         }
         //omni 族
@@ -919,7 +920,10 @@ object PicGenManager {
                 families.add { localTxt2Img(base, prompt.take(PROMPT_MAX))?.let { it to "qwen@local" } }
             }
         }
-        if (families.isEmpty()) throw IllegalStateException("没有启用任何生图渠道")
+        if (families.isEmpty()) throw IllegalStateException(
+            if (internalReachable) "没有启用任何生图渠道"
+            else "无可用渠道: 内网(win/cat)不可达, 请在配置窗口填写 sensenova/agnes/nim 的 key"
+        )
         //开场先探一轮：全部渠道都在冷却/下线时立即报真实原因，别伪装成超时
         val t0 = System.currentTimeMillis()
         val result = withTimeoutOrNull(RACE_TIMEOUT_MS) {
@@ -987,9 +991,9 @@ object PicGenManager {
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
-        //cat 可达 → 生图走 cat 的 mybestvision, 不允许直连 agnes(任何 key)
-        if (PicGenConfig.omniCatReachable) return null
-        //cat 不可达 → 仅用户自定义 agnes key 参与, 不用内置 key
+        //内网(win/cat 网关任一可达) → 生图走网关 mybestvision, 不允许直连 agnes(任何 key)
+        if (internalReachable) return null
+        //非内网 → 仅用户自定义 agnes key 参与, 不用内置 key
         val combos = ArrayList<Triple<String, String, String>>() //base, token, siteKey
         for (site in PicGenChannels.AGNES_SITES) {
             val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
