@@ -104,8 +104,8 @@ object PicGenManager {
     /**
      * 全渠道探活：omni win/cat/win-local 网关 + pony/qwen 生图服务（本机、tailscale win 机候选）。
      * 能用就用，不能用不提示，仅记调试日志。
-     * 同时判定 tailscale 内网可用性：win/cat/本地生图任一可达视为内网可用 → 内置 key 全量启用；
-     * 完全不可达 → 置 needUserKey，首次生图前要求用户配置 key 才允许生成。
+     * 同时判定内置 key 启用条件：cat 网关可达 → 内置 agnes key 启用；
+     * 不可达 → 只用用户 key；win/qwen/pony 仅代表本地生图可用，不启用内置 key。
      */
     private suspend fun probeOmniHosts() {
         var winTs = false
@@ -121,26 +121,37 @@ object PicGenManager {
         }
         PicGenConfig.omniWinReachable = winTs || winLocal
         PicGenConfig.omniCatReachable = cat
-        PicGenConfig.channelOmniWin = winTs || winLocal
+        //cat 可达 → 生图主力走 cat 的 mybestvision，win 网关不参与生图
+        //cat 不可达 → win/cat 网关全部不参与生图（云端只用用户 key）
+        PicGenConfig.channelOmniWin = false
         PicGenConfig.channelOmniCat = cat
         //pony/qwen：候选地址逐个探活，取首个可达的作为活跃地址
         ponyActiveBase = PicGenChannels.PONY_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
         qwenActiveBase = PicGenChannels.QWEN_HOSTS.firstOrNull { probeHttp("$it/v1/models", null) }
         PicGenConfig.channelPony = ponyActiveBase != null
         PicGenConfig.channelQwen = qwenActiveBase != null
-        //tailscale 内网可用：win/cat 网关或本地生图服务任一可达 → 内置 key 全量启用
-        val tailscaleOk = winTs || winLocal || cat || ponyActiveBase != null || qwenActiveBase != null
-        internalReachable = tailscaleOk
-        if (tailscaleOk) {
+        //内置 key 启用依据: 仅 cat 可达时启用 agnes 内置 key;
+        //win/qwen/pony 可达只代表本地生图可用(本身参与竞速), 不启用内置云端 key
+        val catOk = cat
+        internalReachable = catOk
+        if (catOk) {
             needUserKey = false
-            //内网可用：agnes 内置 key 全量启用（用户可随时在设置里关掉）
-            PicGenConfig.channelAgnesCn = true
-            PicGenConfig.channelAgnesCom = true
+            //cat 可达: 生图走 cat 的 mybestvision, 禁止直接访问 agnes(省流量防风控);
+            //其它用户 key 渠道(sensenova/nim/自定义agnes)照常可用
+            PicGenConfig.channelAgnesCn = false
+            PicGenConfig.channelAgnesCom = false
             //确保内置 key 已注册进组合健康表（用户可能从未打开过 key 管理窗）
             registerAllCombos()
+        } else {
+            //cat 不可达: 不使用内置 key, 云端只用用户自己配置的 key; win/cat 网关也不参与
+            PicGenConfig.channelAgnesCn = false
+            PicGenConfig.channelAgnesCom = false
+            //无本地生图渠道(qwen 在 win 上, 任何时候可达都算可用)且无用户 key 时,
+            //首次生图前弹窗要求配置 key
+            needUserKey = ponyActiveBase == null && qwenActiveBase == null
         }
         LogUtils.d(TAG, "渠道探活: omni_win_ts=$winTs omni_win_local=$winLocal omni_cat=$cat " +
-            "pony=$ponyActiveBase qwen=$qwenActiveBase tailscale=$tailscaleOk needUserKey=$needUserKey")
+            "pony=$ponyActiveBase qwen=$qwenActiveBase builtinKeys=$catOk needUserKey=$needUserKey")
     }
 
     /** 网关可达性判断：用探活缓存值（win-local 也以本轮探活结果为准） */
@@ -292,9 +303,10 @@ object PicGenManager {
     @Volatile
     private var needUserKey: Boolean = false
 
-    /** 生图前是否需要用户先配置 key（tailscale 不可达且未配置任何用户 key） */
+    /** 生图前是否需要用户先配置 key（cat 不可达、无本地生图渠道且未配置任何用户 key） */
     fun userKeyRequired(): Boolean {
-        if (!needUserKey) return false
+        //cat 可达(内置 key 可用)或有本地生图渠道时不要求
+        if (internalReachable || PicGenConfig.channelPony || PicGenConfig.channelQwen) return false
         //用户配置了任一来源 key 即视为已满足（sensenova/nim/agnes 自定义）
         val hasUserKey = userKeys(PicGenConfig.sensenovaKeysCn).isNotEmpty() ||
             userKeys(PicGenConfig.sensenovaKeysCom).isNotEmpty() ||
@@ -364,11 +376,18 @@ object PicGenManager {
         return models
     }
 
-    /** 探活周期刷新所有用户服务的模型清单（agnes 内置 key；sensenova/nim 用户 key） */
+    /** 探活周期刷新所有用户服务的模型清单（agnes 用户 key；sensenova/nim 用户 key）
+     *  规则: cat 可达时不直连 agnes(生图走 cat 的 mybestvision, 模型发现也不必打 agnes);
+     *  cat 不可达时 agnes 仅用用户自定义 key(不用内置 key) */
     private suspend fun refreshSvcModels() {
         val targets = ArrayList<Triple<String, String, String>>() //siteKey, base, token
-        for (site in PicGenChannels.AGNES_SITES) {
-            site.tokens.firstOrNull()?.let { targets.add(Triple(site.key, site.base, it)) }
+        if (!PicGenConfig.omniCatReachable) {
+            //仅用户自定义 agnes key 参与发现
+            for (site in PicGenChannels.AGNES_SITES) {
+                val tk = userKeys(if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom)
+                    .firstOrNull()
+                if (tk != null) targets.add(Triple(site.key, site.base, tk))
+            }
         }
         for (site in PicGenChannels.SENSENOVA_SITES) {
             val tk = userKeys(if (site.key == "sensenova_cn") PicGenConfig.sensenovaKeysCn else PicGenConfig.sensenovaKeysCom)
@@ -760,15 +779,16 @@ object PicGenManager {
                 tasks.add { chatOnce(host.base, host.token, combo, prompt) }
             }
         }
-        //agnes 文本模型（内置 key × 发现/兜底模型）
-        for (site in PicGenChannels.AGNES_SITES) {
-            val chOn = if (site.key == "agnes_cn") PicGenConfig.channelAgnesCn else PicGenConfig.channelAgnesCom
-            if (!chOn) continue
-            val tk = site.tokens.firstOrNull() ?: continue
-            val models = svcModels(site.key, site.base, tk)?.chat?.takeIf { it.isNotEmpty() }
-                ?: PicGenChannels.AGNES_CHAT_MODELS
-            for (m in models.take(3)) {
-                tasks.add { chatOnce(site.base, tk, m, prompt) }
+        //agnes 文本模型（仅用户自定义 key；cat 可达时不允许直连 agnes）
+        if (!PicGenConfig.omniCatReachable) {
+            for (site in PicGenChannels.AGNES_SITES) {
+                val tk = userKeys(if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom)
+                    .firstOrNull() ?: continue
+                val models = svcModels(site.key, site.base, tk)?.chat?.takeIf { it.isNotEmpty() }
+                    ?: PicGenChannels.AGNES_CHAT_MODELS
+                for (m in models.take(3)) {
+                    tasks.add { chatOnce(site.base, tk, m, prompt) }
+                }
             }
         }
         //SenseNova 文本模型：用户 key × 发现/兜底模型
@@ -967,13 +987,10 @@ object PicGenManager {
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
+        //cat 可达 → 生图走 cat 的 mybestvision, 不允许直连 agnes(任何 key)
+        if (PicGenConfig.omniCatReachable) return null
+        //cat 不可达 → 仅用户自定义 agnes key 参与, 不用内置 key
         val combos = ArrayList<Triple<String, String, String>>() //base, token, siteKey
-        for (site in PicGenChannels.AGNES_SITES) {
-            val chOn = if (site.key == "agnes_cn") PicGenConfig.channelAgnesCn else PicGenConfig.channelAgnesCom
-            if (!chOn) continue
-            site.tokens.forEach { tk -> combos.add(Triple(site.base, tk, site.key)) }
-        }
-        //用户自定义 agnes key：cn/com 两个输入框各自多行，分别加入对应站竞速
         for (site in PicGenChannels.AGNES_SITES) {
             val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
             userKeys(custom).forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
