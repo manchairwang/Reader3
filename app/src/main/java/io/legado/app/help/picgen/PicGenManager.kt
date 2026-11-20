@@ -501,14 +501,35 @@ object PicGenManager {
      * @param pages (stableKey, 生图文字) 列表。stableKey 由调用方给（阅读位置，横竖屏不变）。
      * 调用方负责把当前章剩余真实分页 + 后续页一并传入（实现全书预读）。
      */
+    /**
+     * 稀疏生成步长: 平均单页阅读耗时 / 平均单张生图耗时, 向上取整, 封顶 10。
+     * 例: 10s/页 阅读, 70s/张 生图 → 每 7 页生成 1 张, 让阅读推进 7 页时正好有 1 张就绪。
+     * 无耗时数据或生图足够快(≤阅读)时为 1(每页都生成)。
+     */
+    fun sparseStride(): Int {
+        val readMs = avgReadMs()
+        val genMs = avgGenTimeMs()
+        if (readMs <= 0 || genMs <= 0) return 1
+        if (genMs <= readMs) return 1
+        return ((genMs + readMs - 1) / readMs).toInt().coerceIn(1, 10)
+    }
+
     fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
         if (!PicGenConfig.windowShow) return
         val cleaned = pages.filter { it.second.isNotBlank() }
             .map { (key, text) -> key to text }
             .filter { it.second.length >= 20 }
         if (cleaned.isEmpty()) return
+        //稀疏生成: 出图比翻页慢时按步长隔 N 页生成 1 张(当前页始终参与),
+        //避免每页任务都排队超时, 一张也等不到
+        val stride = sparseStride()
+        val sparse = if (stride <= 1) cleaned else {
+            //pages[0] 是当前页, 其后按 index % stride == 1 取(即后第 1, 1+stride, 1+2*stride…页)
+            cleaned.filterIndexed { i, _ -> i == 0 || (i - 1) % stride == 0 }
+        }
+        if (sparse.isEmpty()) return
         scope.launch {
-            val keys = cleaned.map { it.first }.toSet()
+            val keys = sparse.map { it.first }.toSet()
             //diff：停掉不再需要的任务
             jobsMutex.withLock {
                 val toCancel = jobs.filterKeys { it !in keys }
@@ -518,8 +539,11 @@ object PicGenManager {
             //动态分辨率：综合 就绪度 + 近期生图耗时 决策
             //目标：用户尽量少等待 → 图片质量尽量好
             dynamicSizePx = decideSize(keys)
-            cleaned.forEach { (key, text) ->
+            sparse.forEach { (key, text) ->
                 genFor(key, text)
+            }
+            if (stride > 1) {
+                LogUtils.d(TAG, "稀疏生成: stride=$stride (阅读${avgReadMs()}ms/页, 生图${avgGenTimeMs()}ms/张)")
             }
         }
     }
