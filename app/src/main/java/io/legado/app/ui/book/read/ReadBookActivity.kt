@@ -1207,8 +1207,8 @@ class ReadBookActivity : BaseReadBookActivity(),
                 val ch = readView.currentChapter
                 val pageIndex = ReadBook.durPageIndex
                 if (ch != null && pageIndex >= 0 && pageIndex < ch.pageSize) {
-                    //窗口随稀疏步长扩展: 锚点页(距离=步长整倍数)必须在窗口内才会被提前生成
-                    val window = maxOf(AHEAD_LIMIT, 2 * PicGenManager.sparseStride())
+                    //视界实时推导(阅读速度/生图速度): 预取窗口随之动态伸缩
+                    val window = PicGenManager.prefetchHorizon()
                     val end = minOf(ch.pageSize, pageIndex + 1 + window)
                     var i = pageIndex + 1
                     while (i < end && pages.size < PREFETCH_CAP) {

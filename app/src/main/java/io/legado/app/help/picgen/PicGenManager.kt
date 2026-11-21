@@ -80,7 +80,7 @@ object PicGenManager {
             registerAllCombos()
             loadStats()
             startComboRecoveryLoop()
-            startRetryLoop()
+            startPrefetchLoop()
             startBenchmarkLoop()
             //全渠道探活循环(自动重试 win/cat/tailscale/本地模型):
             //内网断链或本地渠道缺失时 30s 快速重试; 全部健康后 2min 慢扫
@@ -98,28 +98,16 @@ object PicGenManager {
     }
 
     /**
-     * 失败页定时重试：每 30s 扫描最近可见页集中未就绪、无任务且上次失败已超过
-     * 退避时间(60s)的页, 重新排队生成——阅读中"没图的页"自动补图。
-     * 渠道全冷却时 genFor 秒回失败(不计耗时样本), 下一轮重试继续等。
+     * 滚动预取调度循环：每 10s 一轮。所有参数实时从记录推导——
+     * R=最近10次翻页间隔均值, G=最近6次生图耗时均值, 视界/截止时间随 R/G 动态变化。
+     * 覆盖失败页补图(退避期后自动重排)与空闲容量填充(更远页提前缓存)。
      */
-    private var lastPages: List<Pair<String, String>> = emptyList()
-    private val lastFailAt = ConcurrentHashMap<String, Long>()
-    private const val RETRY_BACKOFF_MS = 60_000L
-    private fun startRetryLoop() {
+    private fun startPrefetchLoop() {
         scope.launch {
             while (true) {
-                kotlinx.coroutines.delay(30_000L)
+                kotlinx.coroutines.delay(10_000L)
                 if (!PicGenConfig.windowShow) continue
-                val pages = lastPages
-                if (pages.isEmpty()) continue
-                val now = System.currentTimeMillis()
-                for ((key, text) in pages) {
-                    if (isReady(key)) { lastFailAt.remove(key); continue }
-                    if (jobs.containsKey(key)) continue
-                    val failAt = lastFailAt[key] ?: 0L
-                    if (now - failAt < RETRY_BACKOFF_MS) continue
-                    genFor(key, text)
-                }
+                prefetchPass()
             }
         }
     }
@@ -585,23 +573,31 @@ object PicGenManager {
         return ((genMs + readMs - 1) / readMs).toInt().coerceIn(1, 10)
     }
 
+    // ---- 滚动预取调度：全部参数实时从记录推导 ----
+    //R = 最近10次翻页间隔均值(阅读速度); G = 最近6次生图耗时均值(生图速度)
+    //页在距离 d 处, 读者预计 d×R 后到达; 截止判据: 预计就绪时间(G×排队系数) ≤ d×R
+    //无数据时 R/G 用保守默认值, 随记录积累自动收敛到真实节奏
+    private var lastPages: List<Pair<String, String>> = emptyList()
+    private val lastFailAt = ConcurrentHashMap<String, Long>()
+    private const val RETRY_BACKOFF_MS = 60_000L
+    private const val DEFAULT_READ_MS = 8_000L
+    private const val DEFAULT_GEN_MS = 30_000L
+
+    /** 预取视界(页数): 步长+6, 随 R/G 实时变化, 封顶 20 */
+    fun prefetchHorizon(): Int {
+        val stride = sparseStride()
+        return (stride + 6).coerceIn(6, 20)
+    }
+
     fun onVisiblePagesChanged(pages: List<Pair<String, String>>) {
         if (!PicGenConfig.windowShow) return
         val cleaned = pages.filter { it.second.isNotBlank() }
             .map { (key, text) -> key to text }
             .filter { it.second.length >= 20 }
         if (cleaned.isEmpty()) return
-        //稀疏生成: 出图比翻页慢时按步长隔 N 页生成 1 张(锚点 = 距离为 stride 整数倍的页),
-        //当前页始终参与; 避免每页任务都排队超时, 一张也等不到
-        val stride = sparseStride()
-        val sparse = if (stride <= 1) cleaned else {
-            //i 是列表位置=与当前页的距离: 取当前页(0)与距离为 stride, 2*stride… 的锚点页
-            cleaned.filterIndexed { i, _ -> i == 0 || i % stride == 0 }
-        }
-        if (sparse.isEmpty()) return
-        lastPages = sparse
+        lastPages = cleaned
         scope.launch {
-            val keys = sparse.map { it.first }.toSet()
+            val keys = cleaned.map { it.first }.toSet()
             //diff：停掉不再需要的任务
             jobsMutex.withLock {
                 val toCancel = jobs.filterKeys { it !in keys }
@@ -609,14 +605,73 @@ object PicGenManager {
                 toCancel.keys.forEach { jobs.remove(it) }
             }
             //动态分辨率：综合 就绪度 + 近期生图耗时 决策
-            //目标：用户尽量少等待 → 图片质量尽量好
             dynamicSizePx = decideSize(keys)
-            sparse.forEach { (key, text) ->
-                genFor(key, text)
+            prefetchPass()
+        }
+    }
+
+    /**
+     * 一轮预取调度（翻页时 + 每 10s 周期各跑一轮）:
+     * 第一优先: 当前页/下一页必生成(读者正在看/马上看)
+     * 第二优先: 截止时间内能就绪的页, 按距离升序排队
+     * 容量填充: 剩余槽位继续调度更远页——图会迟到但进缓存, 不浪费空闲资源
+     * 失败退避(60s)期内的页跳过, 退避满自动重排(即失败页自动补图)
+     */
+    private suspend fun prefetchPass() {
+        val pages = lastPages
+        if (pages.isEmpty()) return
+        val R = avgReadMs().takeIf { it > 0 } ?: DEFAULT_READ_MS
+        val G = avgGenTimeMs().takeIf { it > 0 } ?: DEFAULT_GEN_MS
+        val now = System.currentTimeMillis()
+        var scheduled = 0
+        var skipped = 0
+        var ready = 0
+        var active = jobs.size
+
+        //排序辅助: 页距离 i(0=当前页), 截止判据
+        fun deadlineOk(dist: Int, active: Int): Boolean {
+            val queueWait = if (active >= MAX_CONCURRENT) G else 0L
+            val readyIn = queueWait + G
+            return readyIn <= dist * R
+        }
+
+        //第一优先: 当前页 + 下一页
+        for (i in 0..1.coerceAtMost(pages.size - 1)) {
+            val (key, text) = pages[i]
+            if (isReady(key)) { ready++; continue }
+            if (jobs.containsKey(key)) continue
+            if (now - (lastFailAt[key] ?: 0L) < RETRY_BACKOFF_MS) continue
+            if (active >= MAX_CONCURRENT) break
+            genFor(key, text); active++; scheduled++
+        }
+        //第二优先: 截止时间内能就绪的页(距离升序)
+        for ((i, page) in pages.withIndex()) {
+            if (i <= 1) continue
+            val key = page.first
+            val text = page.second
+            if (isReady(key)) continue
+            if (jobs.containsKey(key)) continue
+            if (now - (lastFailAt[key] ?: 0L) < RETRY_BACKOFF_MS) continue
+            if (active >= MAX_CONCURRENT) break
+            if (deadlineOk(i, active)) {
+                genFor(key, text); active++; scheduled++
             }
-            if (stride > 1) {
-                LogUtils.d(TAG, "稀疏生成: stride=$stride (阅读${avgReadMs()}ms/页, 生图${avgGenTimeMs()}ms/张)")
-            }
+        }
+        //容量填充: 剩余槽位调度更远页(即使会迟到, 也进缓存供回看/停留);
+        //留 1 个空槽给后续截止页, 防止晚到图占满饿死准时图
+        for ((i, page) in pages.withIndex()) {
+            val key = page.first
+            val text = page.second
+            if (isReady(key)) continue
+            if (jobs.containsKey(key)) continue
+            if (now - (lastFailAt[key] ?: 0L) < RETRY_BACKOFF_MS) continue
+            if (active >= MAX_CONCURRENT - 1) break
+            if (i <= 1 || deadlineOk(i, active)) continue  //已在前面调度过
+            genFor(key, text); active++; scheduled++; skipped++
+        }
+        if (scheduled > 0 || ready > 0) {
+            LogUtils.d(TAG, "预取调度: 新排$scheduled 已就绪$ready 满载跳过$skipped " +
+                "(R=${R / 1000}s/页 G=${G / 1000}s/张 视界=${prefetchHorizon()}页 并发$active/${MAX_CONCURRENT} size=$dynamicSizePx)")
         }
     }
 
