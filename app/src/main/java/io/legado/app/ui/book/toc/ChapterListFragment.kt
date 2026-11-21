@@ -168,18 +168,23 @@ class ChapterListFragment : VMBaseFragment<TocViewModel>(R.layout.fragment_chapt
         get() = viewModel.bookData.value?.isLocal == true
 
     override fun durChapterIndex(): Int {
-        return durChapterIndex
+        return if (selectedChapter != null) selectedChapter!!.index else durChapterIndex
+    }
+
+    //目录选择模式: 点击章节=选中(不立即跳转), 底部[确定]再跳; [取消]放弃选择
+    private var selectedChapter: BookChapter? = null
+
+    fun selectedChapter(): BookChapter? = selectedChapter
+
+    fun clearSelection() {
+        selectedChapter = null
+        adapter.notifyItemRangeChanged(0, adapter.itemCount, "")
     }
 
     override fun openChapter(bookChapter: BookChapter) {
-        activity?.run {
-            setResult(
-                RESULT_OK, Intent()
-                    .putExtra("index", bookChapter.index)
-                    .putExtra("chapterChanged", bookChapter.index != durChapterIndex)
-            )
-            finish()
-        }
+        selectedChapter = bookChapter
+        //刷新选中态(高亮=选中章)
+        adapter.notifyItemRangeChanged(0, adapter.itemCount, "")
     }
 
 }
