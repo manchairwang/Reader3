@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.util.Base64
 import android.util.LruCache
 import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.legado.app.help.book.BookHelp
@@ -77,8 +78,10 @@ object PicGenManager {
         //组合注册/恢复循环放到协程内执行——那时所有字段已初始化完成。
         scope.launch {
             registerAllCombos()
+            loadStats()
             startComboRecoveryLoop()
             startRetryLoop()
+            startBenchmarkLoop()
             //全渠道探活循环(自动重试 win/cat/tailscale/本地模型):
             //内网断链或本地渠道缺失时 30s 快速重试; 全部健康后 2min 慢扫
             //模型发现(svcModels)带 5min 节流, 不随探活频率打满 agnes 限流额度
@@ -644,6 +647,7 @@ object PicGenManager {
             readTimes.addLast(ms)
             if (readTimes.size > 10) readTimes.removeFirst()
         }
+        saveStats()
     }
 
     /** 用户最近 10 次平均单页阅读耗时，无样本返回 0 */
@@ -664,6 +668,7 @@ object PicGenManager {
             q.addLast(ms)
             if (q.size > 5) q.removeFirst()
         }
+        saveStats()
     }
 
     /** (base, model) 最近平均生图耗时，无样本返回 0 */
@@ -686,6 +691,106 @@ object PicGenManager {
                 models[seed % models.size]
             } else best.first
         } else models[seed % models.size]
+    }
+
+    // ---- 统计持久化: 模型耗时/阅读速度 跨启动保留(files/picgen_stats.json, <10KB) ----
+    private val statsFile: File by lazy { File(appCtx.filesDir, "picgen_stats.json") }
+
+    private fun loadStats() {
+        try {
+            if (!statsFile.exists()) return
+            val obj = parseJson(statsFile.readText()) ?: return
+            obj.getAsJsonObject("models")?.entrySet()?.forEach { (k, v) ->
+                val arr = v.asJsonArray ?: return@forEach
+                val q = modelTimes.getOrPut(k) { ArrayDeque(5) }
+                synchronized(q) {
+                    arr.forEach { e -> if (!e.isJsonNull) q.addLast(e.asLong) }
+                    while (q.size > 5) q.removeFirst()
+                }
+            }
+            obj.getAsJsonArray("reads")?.forEach { e -> if (!e.isJsonNull) recordPageRead(e.asLong) }
+            LogUtils.d(TAG, "统计恢复: 模型${modelTimes.size}组(阅读${readTimes.size}样本)")
+        } catch (e: Exception) {
+            //坏档直接弃用
+        }
+    }
+
+    private fun saveStats() {
+        try {
+            val models = JsonObject()
+            modelTimes.forEach { (k, q) ->
+                val arr = JsonArray()
+                synchronized(q) { q.forEach { arr.add(it) } }
+                models.add(k, arr)
+            }
+            val reads = JsonArray()
+            synchronized(readTimesMutex) { readTimes.forEach { reads.add(it) } }
+            val root = JsonObject()
+            root.add("models", models)
+            root.add("reads", reads)
+            statsFile.writeText(root.toString())
+        } catch (e: Exception) {
+            //写失败不影响功能
+        }
+    }
+
+    // ---- 内置基准测试: 空闲时每 10 分钟实测一个(服务器,模型)组合的出图延迟 ----
+    //让调度器无需等真实阅读就有全量采样; 走正常生图路径, 自动受并发/限流闸约束
+    private var benchRR = 0
+    private const val BENCH_PROMPT = "a simple red apple, minimalist illustration"
+    private fun startBenchmarkLoop() {
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(10 * 60_000L)
+                if (!PicGenConfig.windowShow) continue
+                if (jobs.isNotEmpty()) continue  //阅读中不打扰
+                runBenchmark()
+            }
+        }
+    }
+
+    private suspend fun runBenchmark() {
+        val candidates = ArrayList<suspend () -> Unit>()
+        //agnes 用户 key × 全部模型
+        if (!internalReachable) {
+            for (site in PicGenChannels.AGNES_SITES) {
+                val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
+                for (tk in userKeys(custom)) {
+                    for (m in PicGenChannels.AGNES_IMAGE_MODELS) {
+                        candidates.add { imageOpenai(site.base, tk, m, BENCH_PROMPT) }
+                    }
+                }
+            }
+        }
+        //omni 网关 × 全部模型
+        for (host in PicGenChannels.OMNI_HOSTS) {
+            val chOn = if (host.name == "cat") PicGenConfig.channelOmniCat else PicGenConfig.channelOmniWin
+            if (!chOn || !hostReachable(host)) continue
+            for (m in PicGenChannels.OMNI_IMAGE_MODELS) {
+                candidates.add { omniOnce(host.base, host.token, host.name, m, BENCH_PROMPT) }
+            }
+        }
+        //本地 qwen
+        qwenActiveBase?.let { base -> candidates.add { localTxt2Img(base, BENCH_PROMPT) } }
+        if (candidates.isEmpty()) return
+        val i = benchRR % candidates.size
+        benchRR++
+        val t0 = System.currentTimeMillis()
+        try { candidates[i]() } catch (e: Exception) { /* 基准失败照常记冷却, 不打断 */ }
+        LogUtils.d(TAG, "内置测试 #${i + 1}/${candidates.size}: ${System.currentTimeMillis() - t0}ms")
+        statsLog()
+        saveStats()
+    }
+
+    /** 调度摘要日志: 各(服务器|模型)平均耗时 + 阅读速度 + 稀疏步长 + 当前分辨率 */
+    private fun statsLog() {
+        val parts = modelTimes.entries.take(8).map { (k, q) ->
+            val avg = synchronized(q) { if (q.isEmpty()) 0L else q.sum() / q.size }
+            val n = synchronized(q) { q.size }
+            "$k=${avg / 1000}s(n$n)"
+        }
+        LogUtils.d(TAG, "调度统计: [${parts.joinToString(", ")}] " +
+            "阅读=${avgReadMs() / 1000}s/页 stride=${sparseStride()} size=$dynamicSizePx")
     }
 
     /** 近期平均生图耗时（毫秒），无样本返回 0 */
@@ -1236,6 +1341,7 @@ object PicGenManager {
         val gate = omniUpstreamSemaphores.getOrPut(
             if (hostName == "win-local") "win" else hostName
         ) { Semaphore(2) }
+        val t0 = System.currentTimeMillis()
         return try {
             val body = gson.toJson(
                 mapOf(
@@ -1254,10 +1360,13 @@ object PicGenManager {
             val item = parseImageResponse(data)
                 ?: throw IllegalStateException("响应无 b64_json 也无 url")
             recordSuccess(rkey)
+            recordModelTime(hostName, model, System.currentTimeMillis() - t0)
             item.first to "${model}@${hostName}"
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
+            val cost = System.currentTimeMillis() - t0
+            if (cost >= 5_000L) recordModelTime(hostName, model, cost)
             LogUtils.d(TAG, "omni fail: $hostName $model ${e.message}")
             null
         }
