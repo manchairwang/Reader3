@@ -162,8 +162,11 @@ object PicGenManager {
         var winTs = false
         var winLocal = false
         var cat = false
+        //探活防误杀: models 端点慢/503 ≠ 生图坏(win 实测生图 4.8s 而 models 8s 超时),
+        //10 分钟内有 omni 生图成功时, 探活失败也保持渠道开启
+        val freshSuccess = System.currentTimeMillis() - omniLastSuccessAt < OMNI_FRESH_SUCCESS_MS
         for (host in PicGenChannels.OMNI_HOSTS) {
-            val reachable = probeHttp("${host.base}/v1/models", host.token)
+            val reachable = probeHttp("${host.base}/v1/models", host.token) || freshSuccess
             when (host.name) {
                 "win" -> winTs = reachable
                 "win-local" -> winLocal = reachable
@@ -341,6 +344,28 @@ object PicGenManager {
 
     //omni 同上游归一并发闸：cat(win) 的域名/IP 双候选视为同一服务器, 各限 2 并发
     private val omniUpstreamSemaphores = ConcurrentHashMap<String, Semaphore>()
+
+    //omni 生图成败驱动渠道开关: 探活端点不可靠(models 503/慢 ≠ 生图坏),
+    //渠道"开"由探活决定, "关"只看连续生图失败
+    @Volatile
+    private var omniFailStreak = 0
+    @Volatile
+    private var omniLastSuccessAt = 0L
+    @Volatile
+    private var omniDisabledUntil = 0L
+    private const val OMNI_FAIL_STREAK_MAX = 3          //连败 3 次禁用
+    private const val OMNI_DISABLE_MS = 5 * 60_000L     //禁用 5 分钟后由探活/重试恢复
+    private const val OMNI_FRESH_SUCCESS_MS = 10 * 60_000L
+
+    /** omni 族当前是否该参与生图(未被连败禁用) */
+    private fun omniAlive(): Boolean = System.currentTimeMillis() >= omniDisabledUntil
+
+    /** 内网生图"实际"可用: 网关开着且没被连败禁用——agnes_user 是否解禁以此为准 */
+    private fun omniUsable(): Boolean =
+        (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) && omniAlive()
+
+    //本地生图(pony/qwen sdcpp)单 GPU 串行闸: 2 并发会让两个请求一起排队超时(实测 110s/138s)
+    private val localSemaphore = Semaphore(1)
 
     //pony/qwen 探活后的活跃地址（null 表示全部不可达）
     @Volatile
@@ -1129,13 +1154,14 @@ object PicGenManager {
     // ---- 生图：agnes/sensenova/NIM/omni 多族并行竞速，最先成功赢；本地 pony/qwen 探活后用 ----
     private suspend fun generateImage(prompt: String): Pair<ByteArray, String> {
         val families = ArrayList<suspend () -> Pair<ByteArray, String>?>()
-        //agnes 族：非内网用用户自定义 key；内网(win/cat 可达)禁直连 agnes
+        //agnes 族：内网网关"实际可用"(开着且未被连败禁用)时禁直连 agnes;
+        //网关坏(连败禁用/探活关闭)时自动解禁, 用户自定义 agnes key 接管——保证阅读总有图
         val userAgnesKeys = userKeys(PicGenConfig.agnesKeysCn).isNotEmpty() || userKeys(PicGenConfig.agnesKeysCom).isNotEmpty()
-        if (!internalReachable && userAgnesKeys) {
+        if (userAgnesKeys && !(internalReachable && omniUsable())) {
             families.add { imageAgnes(prompt) }
         }
-        //omni 族
-        if (PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) {
+        //omni 族：连败禁用期内跳过, 5 分钟后由重试/探活恢复
+        if ((PicGenConfig.channelOmniWin || PicGenConfig.channelOmniCat) && omniAlive()) {
             families.add { imageOmniroute(prompt) }
         }
         //NIM 族：填了 key 即参与
@@ -1360,6 +1386,8 @@ object PicGenManager {
             val item = parseImageResponse(data)
                 ?: throw IllegalStateException("响应无 b64_json 也无 url")
             recordSuccess(rkey)
+            omniFailStreak = 0
+            omniLastSuccessAt = System.currentTimeMillis()
             recordModelTime(hostName, model, System.currentTimeMillis() - t0)
             item.first to "${model}@${hostName}"
         } catch (e: Exception) {
@@ -1367,6 +1395,12 @@ object PicGenManager {
             recordFailure(rkey)
             val cost = System.currentTimeMillis() - t0
             if (cost >= 5_000L) recordModelTime(hostName, model, cost)
+            omniFailStreak++
+            if (omniFailStreak >= OMNI_FAIL_STREAK_MAX) {
+                //连败禁用: models 探活不可靠(503/慢≠生图可用), 以真实生图成败为准
+                omniDisabledUntil = System.currentTimeMillis() + OMNI_DISABLE_MS
+                LogUtils.d(TAG, "omni 连败$omniFailStreak 次, 禁用 ${OMNI_DISABLE_MS / 1000}s, 放行用户 key 渠道")
+            }
             LogUtils.d(TAG, "omni fail: $hostName $model ${e.message}")
             null
         }
@@ -1392,8 +1426,11 @@ object PicGenManager {
                     "response_format" to "b64_json"
                 )
             )
-            val data = withTimeoutOrNull(RACE_TIMEOUT_MS) {
-                postJsonRequest("$base/v1/images/generations", body, null)
+            //单 GPU 串行闸: sdcpp 排队 2 个请求会双双超时(实测 110s/138s), 严格 1 并发
+            val data = localSemaphore.withPermit {
+                withTimeoutOrNull(RACE_TIMEOUT_MS) {
+                    postJsonRequest("$base/v1/images/generations", body, null)
+                }
             }
             val item = if (data != null) parseImageResponse(data) else null
             if (item != null) {
