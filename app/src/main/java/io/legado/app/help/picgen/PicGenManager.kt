@@ -651,6 +651,43 @@ object PicGenManager {
         if (readTimes.isEmpty()) 0L else readTimes.sum() / readTimes.size
     }
 
+    // ---- 模型级调度：每(base, model) 最近 5 次生图耗时 → ETA 排序, 最快模型优先占用并发闸 ----
+    private val modelTimes = ConcurrentHashMap<String, ArrayDeque<Long>>() //key "base|model"
+    private const val ETA_UNKNOWN_MS = 60_000L  //无实测数据模型的预估耗时(排在已知快模型之后)
+
+    data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+    /** 记录一次(base, model)生图耗时(成功/真实慢失败都记, 秒回失败由调用方过滤) */
+    private fun recordModelTime(base: String, model: String, ms: Long) {
+        val q = modelTimes.getOrPut("$base|$model") { ArrayDeque(5) }
+        synchronized(q) {
+            q.addLast(ms)
+            if (q.size > 5) q.removeFirst()
+        }
+    }
+
+    /** (base, model) 最近平均生图耗时，无样本返回 0 */
+    private fun avgModelTimeMs(base: String, model: String): Long {
+        val q = modelTimes["$base|$model"] ?: return 0L
+        synchronized(q) {
+            if (q.isEmpty()) return 0L
+            return q.sum() / q.size
+        }
+    }
+
+    /** 该服务器上实测最快的模型；全部无数据时按 seed 轮换(保证都能被采样) */
+    private fun fastestModel(base: String, models: List<String>, seed: Int): String {
+        if (models.isEmpty()) return ""
+        val known = models.map { it to avgModelTimeMs(base, it) }.filter { it.second > 0 }
+        return if (known.isNotEmpty()) {
+            //同速差异小(<1s)时轮换, 避免永远打同一个模型
+            val best = known.minByOrNull { it.second }!!
+            if (known.size > 1 && best.second - (known.maxByOrNull { it.second }!!.second) < 1_000L) {
+                models[seed % models.size]
+            } else best.first
+        } else models[seed % models.size]
+    }
+
     /** 近期平均生图耗时（毫秒），无样本返回 0 */
     private fun avgGenTimeMs(): Long {
         synchronized(genTimesMutex) {
@@ -1074,11 +1111,15 @@ object PicGenManager {
             recordSuccess(rkey)
             comboSuccess(c)
             recordComboTime(base, token, System.currentTimeMillis() - t0)
+            recordModelTime(base, model, System.currentTimeMillis() - t0)
             item.first to model
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             recordFailure(rkey)
             comboSlow(c)
+            val cost = System.currentTimeMillis() - t0
+            //真实慢失败(超时/挂起)计入模型耗时样本, 让调度器下次跳过该模型
+            if (cost >= 5_000L) recordModelTime(base, model, cost)
             null
         } finally {
             //竞速中被取消/慢完成也记一笔：>SLOW_MS 连 COMBO_SLOW_MAX 次下线
@@ -1088,23 +1129,26 @@ object PicGenManager {
     }
 
     private suspend fun imageAgnes(prompt: String): Pair<ByteArray, String>? {
-        //内网(win/cat 网关任一可达) → 生图走网关 mybestvision, 不允许直连 agnes(任何 key)
+        //内网(win/cat 网关任一可达) → 生图走网关, 不允许直连 agnes(任何 key)
         if (internalReachable) return null
         //非内网 → 仅用户自定义 agnes key 参与, 不用内置 key
-        val combos = ArrayList<Triple<String, String, String>>() //base, token, siteKey
+        //调度: 每个 token 选其实测最快的模型, 候选按预计完成时间(ETA)升序, 取最快的 AGNES_WAVE 个;
+        //并发(2)与每分钟请求(<9)由 postJsonRequest 的 per-host 信号闸+限流闸兜底, 排队不丢弃
+        val candidates = ArrayList<Quadruple<String, String, String, Long>>() //base, token, siteKey, eta
         for (site in PicGenChannels.AGNES_SITES) {
             val custom = if (site.key == "agnes_cn") PicGenConfig.agnesKeysCn else PicGenConfig.agnesKeysCom
-            userKeys(custom).forEach { tk -> combos.add(Triple(site.base, tk, "agnes_user")) }
+            for (tk in userKeys(custom)) {
+                val models = PicGenChannels.AGNES_IMAGE_MODELS
+                val model = fastestModel(site.base, models, agnesRR + candidates.size)
+                val eta = avgModelTimeMs(site.base, model).let { if (it > 0) it else ETA_UNKNOWN_MS }
+                candidates.add(Quadruple(site.base, tk, "agnes_user", eta))
+            }
         }
-        if (combos.isEmpty()) return null
-        //一波并发上限：瞬时全量开火会触发上游风控(429/封号)，轮换着最多发 AGNES_WAVE 个
-        val off = agnesRR
-        val wave = (0 until minOf(AGNES_WAVE, combos.size)).map { i -> combos[(off + i) % combos.size] }
-        val tasks = wave.mapIndexed { ti, (base, tk, siteKey) ->
-            val svcKey = if (siteKey == "agnes_user") null else siteKey
-            val models = svcKey?.let { svcModels(it, base, tk)?.image?.takeIf { im -> im.isNotEmpty() } }
-                ?: PicGenChannels.AGNES_IMAGE_MODELS
-            val model = models[(ti + agnesRR) % models.size]
+        if (candidates.isEmpty()) return null
+        val wave = candidates.sortedBy { it.fourth }.take(minOf(AGNES_WAVE, candidates.size))
+        val tasks = wave.map { (base, tk, siteKey, _) ->
+            val models = PicGenChannels.AGNES_IMAGE_MODELS
+            val model = fastestModel(base, models, agnesRR)
             scope.async {
                 imageOpenai(base, tk, model, prompt)?.let { (bytes, m) -> bytes to "${m}@${siteKey}" }
             }
@@ -1146,11 +1190,14 @@ object PicGenManager {
             val svc = svcCache[site.key]
             val models = svc?.image?.takeIf { it.isNotEmpty() } ?: continue
             val base = site.base
-            val off = snRR % models.size
             snRR++
+            //调度: 每 key 用该站实测最快的 2 个模型(无数据按 snRR 轮换采样)
             keys.take(2).forEach { tk ->
-                (0 until minOf(2, models.size)).forEach { i ->
-                    val model = models[(off + i) % models.size]
+                val first = fastestModel(base, models, snRR)
+                val second = models.filter { it != first }.let {
+                    if (it.isEmpty()) first else fastestModel(base, it, snRR + 1)
+                }
+                listOf(first, second).distinct().forEach { model ->
                     tasks.add {
                         imageOpenai(base, tk, model, prompt)?.let { (bytes, m) -> bytes to "${m}@${site.key}" }
                     }
