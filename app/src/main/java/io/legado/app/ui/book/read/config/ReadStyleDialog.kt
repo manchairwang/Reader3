@@ -41,6 +41,22 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
     private val callBack get() = activity as? ReadBookActivity
     private lateinit var styleAdapter: StyleAdapter
 
+    //打开时的设置快照：取消按钮用它恢复(仅覆盖本对话框会改到的字段)
+    private data class StyleSnapshot(
+        val shareLayout: Boolean,
+        val pageAnim: Int,
+        val textSize: Int,
+        val letterSpacing: Float,
+        val lineSpacingExtra: Int,
+        val paragraphSpacing: Int,
+        val paragraphIndent: String,
+        val textFont: String,
+        val styleSelect: Int,
+        val windowShow: Boolean,
+        val showInfo: Boolean
+    )
+    private var snapshot: StyleSnapshot? = null
+
     override fun onStart() {
         super.onStart()
         dialog?.window?.run {
@@ -59,9 +75,46 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
 
     override fun onFragmentCreated(view: View, savedInstanceState: Bundle?) {
         (activity as ReadBookActivity).bottomDialog++
+        snapshot()
         initView()
         initData()
         initViewEvent()
+    }
+
+    private fun snapshot() {
+        snapshot = StyleSnapshot(
+            shareLayout = ReadBookConfig.shareLayout,
+            pageAnim = ReadBookConfig.pageAnim,
+            textSize = ReadBookConfig.textSize,
+            letterSpacing = ReadBookConfig.letterSpacing,
+            lineSpacingExtra = ReadBookConfig.lineSpacingExtra,
+            paragraphSpacing = ReadBookConfig.paragraphSpacing,
+            paragraphIndent = ReadBookConfig.paragraphIndent,
+            textFont = ReadBookConfig.textFont,
+            styleSelect = ReadBookConfig.styleSelect,
+            windowShow = PicGenConfig.windowShow,
+            showInfo = PicGenConfig.showInfo
+        )
+    }
+
+    /** 取消：恢复打开时的快照并刷新界面 */
+    private fun restoreSnapshot() {
+        val s = snapshot ?: return
+        ReadBookConfig.shareLayout = s.shareLayout
+        ReadBookConfig.pageAnim = s.pageAnim
+        ReadBookConfig.textSize = s.textSize
+        ReadBookConfig.letterSpacing = s.letterSpacing
+        ReadBookConfig.lineSpacingExtra = s.lineSpacingExtra
+        ReadBookConfig.paragraphSpacing = s.paragraphSpacing
+        ReadBookConfig.paragraphIndent = s.paragraphIndent
+        ReadBookConfig.textFont = s.textFont
+        ReadBookConfig.styleSelect = s.styleSelect
+        PicGenConfig.windowShow = s.windowShow
+        PicGenConfig.showInfo = s.showInfo
+        postEvent(EventBus.UP_CONFIG, arrayListOf(1, 2, 5, 8))
+        callBack?.upPageAnim()
+        ReadBook.loadContent(false)
+        initData()
     }
 
     override fun onDismiss(dialog: DialogInterface) {
@@ -79,6 +132,14 @@ class ReadStyleDialog : BaseDialogFragment(R.layout.dialog_read_book_style),
         tvBgTs.setTextColor(textColor)
         tvShareLayout.setTextColor(textColor)
         tvPicWindowLabel.setTextColor(textColor)
+        //确定/取消按钮着色与事件：确定=保留当前修改直接关闭；取消=恢复打开时的快照
+        btnOk.setTextColor(textColor)
+        btnCancel.setTextColor(textColor)
+        btnOk.setOnClickListener { dismissAllowingStateLoss() }
+        btnCancel.setOnClickListener {
+            restoreSnapshot()
+            dismissAllowingStateLoss()
+        }
         dsbTextSize.valueFormat = {
             (it + 5).toString()
         }

@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tool="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
+    android:orientation="vertical">
+
+<ScrollView
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
     android:fillViewport="true">
 
 <LinearLayout
@@ -399,4 +405,40 @@
         tool:listitem="@layout/item_read_style" />
 
 </LinearLayout>
-</ScrollView>
+    </ScrollView>
+
+    <!-- 确定 / 取消 按钮栏 -->
+    <LinearLayout
+        android:id="@+id/btn_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/background"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp">
+
+        <TextView
+            android:id="@+id/btn_cancel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:padding="12dp"
+            android:background="?attr/selectableItemBackground"
+            android:text="@string/cancel"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/btn_ok"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:padding="12dp"
+            android:background="?attr/selectableItemBackground"
+            android:text="@string/ok"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+</LinearLayout>

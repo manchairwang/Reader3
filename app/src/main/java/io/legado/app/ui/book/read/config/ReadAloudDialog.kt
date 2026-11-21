@@ -29,6 +29,12 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
     private val callBack: CallBack? get() = activity as? CallBack
     private val binding by viewBinding(DialogReadAloudBinding::bind)
 
+    //打开时的设置快照：取消按钮用它恢复
+    private var snapTtsFlowSys = true
+    private var snapTtsSpeechRate = 0
+    private var snapTtsTimer = 0
+    private var snapTimeMinute = 0
+
     override fun onStart() {
         super.onStart()
         dialog?.window?.run {
@@ -54,6 +60,11 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
             dismiss()
             return
         }
+        //快照：本对话框会改到的全部设置
+        snapTtsFlowSys = AppConfig.ttsFlowSys
+        snapTtsSpeechRate = AppConfig.ttsSpeechRate
+        snapTtsTimer = AppConfig.ttsTimer
+        snapTimeMinute = BaseReadAloudService.timeMinute
         val bg = requireContext().bottomBackground
         val isLight = ColorUtils.isColorLight(bg)
         val textColor = requireContext().getPrimaryTextColor(isLight)
@@ -81,6 +92,52 @@ class ReadAloudDialog : BaseDialogFragment(R.layout.dialog_read_aloud) {
             tvSetting.setTextColor(textColor)
             cbTtsFollowSys.setTextColor(textColor)
         }
+        //确定/取消按钮栏：确定=保留修改关闭；取消=恢复打开时的快照
+        val btnBar = android.widget.LinearLayout(requireContext()).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            setPadding(16.dpToPx(), 8.dpToPx(), 16.dpToPx(), 8.dpToPx())
+            gravity = android.view.Gravity.CENTER
+            fun mkBtn(text: String): android.widget.TextView =
+                android.widget.TextView(requireContext()).apply {
+                    this.text = text
+                    textSize = 16f
+                    gravity = android.view.Gravity.CENTER
+                    setPadding(12.dpToPx(), 12.dpToPx(), 12.dpToPx(), 12.dpToPx())
+                    background =
+                        requireContext().obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground))
+                            .getDrawable(0)
+                    setTextColor(textColor)
+                }
+            val cancel = mkBtn(getString(R.string.cancel)).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener {
+                    AppConfig.ttsFlowSys = snapTtsFlowSys
+                    AppConfig.ttsSpeechRate = snapTtsSpeechRate
+                    AppConfig.ttsTimer = snapTtsTimer
+                    ReadAloud.setTimer(requireContext(), snapTimeMinute)
+                    binding.cbTtsFollowSys.isChecked = snapTtsFlowSys
+                    binding.seekTtsSpeechRate.progress = snapTtsSpeechRate
+                    binding.seekTimer.progress = snapTimeMinute
+                    upTtsSpeechRateEnabled(!snapTtsFlowSys)
+                    upTtsSpeechRate()
+                    upTimerText(BaseReadAloudService.timeMinute)
+                    dismissAllowingStateLoss()
+                }
+            }
+            val ok = mkBtn(getString(R.string.ok)).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { dismissAllowingStateLoss() }
+            }
+            addView(cancel)
+            addView(ok)
+        }
+        binding.rootView.addView(
+            btnBar,
+            android.widget.LinearLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
         initData()
         initEvent()
     }
