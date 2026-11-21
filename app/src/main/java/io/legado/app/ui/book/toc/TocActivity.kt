@@ -60,6 +60,21 @@ class TocActivity : VMBaseActivity<ActivityChapterListBinding, TocViewModel>(),
         binding.viewPager.adapter = TabFragmentPageAdapter()
         tabLayout.setupWithViewPager(binding.viewPager)
         tabLayout.tabGravity = TabLayout.GRAVITY_CENTER
+        //底部[确定]=跳到选中章节并返回; [取消]=放弃选择直接返回(书签页无选中态, 直接返回)
+        binding.btnOk.setOnClickListener {
+            val frag = supportFragmentManager.fragments
+                .filterIsInstance<ChapterListFragment>().firstOrNull()
+            val sel = frag?.selectedChapter()
+            if (sel != null) {
+                setResult(
+                    RESULT_OK, Intent()
+                        .putExtra("index", sel.index)
+                        .putExtra("chapterChanged", sel.index != ReadBook.durChapterIndex)
+                )
+            }
+            finish()
+        }
+        binding.btnCancel.setOnClickListener { finish() }
         viewModel.bookData.observe(this) {
             menu?.setGroupVisible(R.id.menu_group_text, it.isLocalTxt)
         }

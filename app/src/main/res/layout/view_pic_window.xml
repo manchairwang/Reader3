@@ -4,6 +4,23 @@
     android:layout_height="match_parent"
     android:background="#80000000">
 
+    <!--第0层：缓存拼图背景（首图未就绪时显示，30s 轮换）-->
+    <ImageView
+        android:id="@+id/iv_pic_mosaic"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:contentDescription="@string/pic_window"
+        android:visibility="gone" />
+
+    <!--第1层：半透明白雾，盖在拼图上降低干扰，可看清文字/状态-->
+    <View
+        android:id="@+id/v_mosaic_fog"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#99FFFFFF"
+        android:visibility="gone" />
+
     <ImageView
         android:id="@+id/iv_pic"
         android:layout_width="match_parent"
@@ -45,14 +62,13 @@
         android:padding="4dp"
         android:src="@drawable/ic_baseline_close" />
 
-    <!--左下角诊断层：提示词 + 生成来源(服务器/模型)，配置开关控制显隐-->
+    <!--左下角诊断层：提示词 + 生成来源(服务器/模型)，配置开关控制显隐。显示全部提示词，不设行数上限-->
     <TextView
         android:id="@+id/tv_pic_info"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|start"
-        android:ellipsize="end"
-        android:maxLines="3"
+        android:background="#66000000"
         android:padding="4dp"
         android:textColor="#FFFFFF"
         android:textSize="10sp"

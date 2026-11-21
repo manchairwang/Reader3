@@ -196,4 +196,6 @@ object PreferKey {
     const val picGenChannelOmniWin = "picGenChannelOmniWin"
     const val picGenChannelOmniCat = "picGenChannelOmniCat"
     const val picGenLlmEnable = "picGenLlmEnable"
+    const val picGenIncludeFullText = "picGenIncludeFullText"
+    const val picGenPrefetchWholeBook = "picGenPrefetchWholeBook"
 }

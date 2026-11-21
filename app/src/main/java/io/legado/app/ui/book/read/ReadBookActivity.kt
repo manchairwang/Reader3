@@ -76,6 +76,7 @@ import io.legado.app.ui.book.bookmark.BookmarkDialog
 import io.legado.app.ui.book.changesource.ChangeBookSourceDialog
 import io.legado.app.ui.book.changesource.ChangeChapterSourceDialog
 import io.legado.app.ui.book.info.BookInfoActivity
+import io.legado.app.ui.book.read.config.AgnesKeysDialog
 import io.legado.app.ui.book.read.config.AutoReadDialog
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.BG_COLOR
 import io.legado.app.ui.book.read.config.BgTextConfigDialog.Companion.TEXT_COLOR
@@ -242,6 +243,7 @@ class ReadBookActivity : BaseReadBookActivity(),
     private val prevPageDebounce by lazy { Debounce { keyPage(PageDirection.PREV) } }
     private var bookChanged = false
     private var pageChanged = false
+    private var lastPageChangeAt = 0L
     private val handler by lazy { buildMainHandler() }
     private val screenOffRunnable by lazy { Runnable { keepScreenOn(false) } }
     private val executor = ReadBook.executor
@@ -1065,6 +1067,10 @@ class ReadBookActivity : BaseReadBookActivity(),
         executor.execute {
             startBackupJob()
         }
+        //记录本次翻页间隔（上一次翻页到现在）= 单页阅读耗时，供分辨率决策
+        val now = System.currentTimeMillis()
+        if (lastPageChangeAt > 0L) PicGenManager.recordPageRead(now - lastPageChangeAt)
+        lastPageChangeAt = now
         triggerPicGen()
     }
 
@@ -1105,6 +1111,14 @@ class ReadBookActivity : BaseReadBookActivity(),
         //中 1/3 单击：与正文一致开菜单（可配置点击区域行为，正文走 ReadView.click）
         picWindow.onCenterTap = {
             if (!menuLayoutIsVisible) showActionMenu()
+        }
+        //tailscale 不可达时，首次生图前弹出 key 管理窗引导配置
+        PicGenManager.onRequestUserKey = {
+            if (supportFragmentManager.findFragmentByTag("agnesKeysDialog") == null &&
+                !isFinishing
+            ) {
+                AgnesKeysDialog().show(supportFragmentManager, "agnesKeysDialog")
+            }
         }
         upPicWindowLayout()
     }
@@ -1176,7 +1190,9 @@ class ReadBookActivity : BaseReadBookActivity(),
     private var currentPicKey: String? = null
 
     /**
-     * 翻页/加载后触发：当前页 + 预读页送入生图管理器
+     * 翻页/加载后触发：当前页 + 全书预读页送入生图管理器。
+     * 预读策略：当前章剩余真实分页全部取来自动生成（与阅读 key 一致，缓存可复用），
+     * 到章末用 nextPage 跨章继续取下一页；跳页时任务由管理器 diff 自动放弃。
      */
     private fun triggerPicGen() = binding.run {
         if (!PicGenConfig.windowShow) return
@@ -1186,11 +1202,29 @@ class ReadBookActivity : BaseReadBookActivity(),
             //当前页 key 用阅读位置（章号+章内字符偏移），横竖屏分页变化不影响
             val curKey = "c${ReadBook.durChapterIndex}@p${ReadBook.durChapterPos}"
             pages.add(curKey to factory.curPage.text)
-            //预读：当前章后 2 页；跨章取下一章首页（用各自页起始位置做 key）
-            val next = factory.nextPage
-            if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
-            val nextPlus = factory.nextPlusPage
-            if (nextPlus.text.isNotBlank()) pages.add(stableKey(nextPlus) to nextPlus.text)
+            if (PicGenConfig.prefetchWholeBook) {
+                //全书预读：当前章剩余真实分页全部取来（curPage 每页 index 递增，页已布局即有效）
+                val ch = readView.currentChapter
+                val pageIndex = ReadBook.durPageIndex
+                if (ch != null && pageIndex >= 0 && pageIndex < ch.pageSize) {
+                    //视界实时推导(阅读速度/生图速度): 预取窗口随之动态伸缩
+                    val window = PicGenManager.prefetchHorizon()
+                    val end = minOf(ch.pageSize, pageIndex + 1 + window)
+                    var i = pageIndex + 1
+                    while (i < end && pages.size < PREFETCH_CAP) {
+                        ch.getPage(i)?.let { p ->
+                            if (p.text.isNotBlank()) pages.add(stableKey(p) to p.text)
+                        }
+                        i++
+                    }
+                }
+            } else {
+                //预读：当前章后 3 页；跨章取下一章首页（用各自页起始位置做 key）
+                val next = factory.nextPage
+                if (next.text.isNotBlank()) pages.add(stableKey(next) to next.text)
+                val nextPlus = factory.nextPlusPage
+                if (nextPlus.text.isNotBlank()) pages.add(stableKey(nextPlus) to nextPlus.text)
+            }
         } catch (e: Exception) {
             LogUtils.d("PicGen", "get page text fail: ${e.message}")
         }
@@ -1203,7 +1237,7 @@ class ReadBookActivity : BaseReadBookActivity(),
             PicGenManager.cachedBitmap(key)?.let {
                 picWindow.setBitmap(it)
                 picWindow.showInfo(PicGenManager.infoFor(key))
-            } ?: picWindow.showLoading()
+            } ?: picWindow.showLoading(key)
         }
         PicGenManager.onVisiblePagesChanged(pages)
     }
@@ -1876,6 +1910,9 @@ class ReadBookActivity : BaseReadBookActivity(),
 
     companion object {
         const val RESULT_DELETED = 100
+        //全书预读单次上限：一次触发最多追加这么多页，避免打爆并发与内存
+        private const val PREFETCH_CAP = 40
+    private const val AHEAD_LIMIT = 3   //最多提前生成当前页后面 3 页
     }
 
 }

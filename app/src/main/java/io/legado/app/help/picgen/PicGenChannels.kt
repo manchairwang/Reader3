@@ -77,20 +77,23 @@ object PicGenChannels {
         "stability-ai/stable-diffusion-3_5-large"
     )
     val NIM_CHAT_MODELS = listOf(
-        "meta/llama-3.3-70b-instruct",
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-        "step-5-preview"
+        "nvidia/mistralai/mistral-large-4-1t-a52b",
+        "nvidia/nvidia/nemotron-3.5-bolt-e4b",
+        "nvidia/nvidia/nemotron-3.5-super-vl-120b-a12b"
     )
 
-    //omniroute 网关：tailscale win/cat + 本机
+    //omniroute 网关: cat 域名+tailscale IP 双候选(部分安卓 ROM MagicDNS 域名解析不稳, IP 直连兜底)
     val OMNI_HOSTS = listOf(
-        OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-d5e5f6-932e7e52"),
-        OmniHost("win-local", "http://localhost:20128", "sk-4a9487328faacff4-d5e5f6-932e7e52"),
-        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-3b1b80865d32ec86-fe3da1-1afe5927")
+        OmniHost("win", "http://win.tail976197.ts.net:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("win", "http://100.117.227.114:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("win-local", "http://localhost:20128", "sk-4a9487328faacff4-0773dd-9bc78fc6"),
+        OmniHost("cat", "http://cat.tail976197.ts.net:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29"),
+        OmniHost("cat", "http://100.64.173.106:20128", "sk-77e71f5303ff9d7f-06e1ee-da49dc29")
     )
 
-    //omniroute 生图模型
-    val OMNI_IMAGE_MODELS = listOf("mybestvision")
+    //omniroute 生图模型：schnell 实测 4-6s；mybestvision 实测 cat 120s+/win 38s 且占并发闸,
+    //拖慢竞速, 已从自动竞速剔除(需要时可在 cat/win 的 omniroute 服务端改模型映射)
+    val OMNI_IMAGE_MODELS = listOf("nvidia/black-forest-labs/flux.1-schnell")
 
     //omniroute 优先提示词 combo
     val PREFERRED_CHAT_COMBOS = listOf("mybestfast", "mygoodfast")

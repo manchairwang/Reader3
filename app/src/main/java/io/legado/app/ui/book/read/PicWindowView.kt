@@ -17,6 +17,7 @@ import android.animation.ValueAnimator
 import io.legado.app.R
 import io.legado.app.help.picgen.PicGenConfig
 import io.legado.app.utils.sendToClip
+import kotlinx.coroutines.launch
 
 /**
  * 阅读页图片窗口：竖屏在正文下方、横屏在正文右侧。
@@ -31,6 +32,8 @@ class PicWindowView @JvmOverloads constructor(
 
     private val ivPic: ImageView
     private val ivLoading: ImageView
+    private val ivMosaic: ImageView
+    private val vFog: View
     private val tvStatus: TextView
     private val btnClose: ImageView
     private val tvInfo: TextView
@@ -87,12 +90,15 @@ class PicWindowView @JvmOverloads constructor(
         LayoutInflater.from(context).inflate(R.layout.view_pic_window, this, true)
         ivPic = findViewById(R.id.iv_pic)
         ivLoading = findViewById(R.id.iv_pic_loading)
+        ivMosaic = findViewById(R.id.iv_pic_mosaic)
+        vFog = findViewById(R.id.v_mosaic_fog)
         tvStatus = findViewById(R.id.tv_pic_status)
         btnClose = findViewById(R.id.btn_pic_close)
         tvInfo = findViewById(R.id.tv_pic_info)
         btnClose.setOnClickListener {
             PicGenConfig.windowShow = false
             visibility = GONE
+            io.legado.app.help.picgen.PicGenManager.shutdownAll()
             onClose?.invoke()
         }
         //点击错误/状态文字：复制到剪贴板
@@ -149,6 +155,7 @@ class PicWindowView @JvmOverloads constructor(
     }
 
     fun setBitmap(bitmap: Bitmap) {
+        stopMosaic()
         ivPic.setImageBitmap(bitmap)
         ivPic.visibility = VISIBLE
         stopLoading()
@@ -165,13 +172,16 @@ class PicWindowView @JvmOverloads constructor(
         }
     }
 
-    //加载中：保留旧图，仅叠转圈，避免黑底闪烁
+    //加载中：切到新页后图片未就绪时，隐藏上一页图，改显示缓存拼图背景（4x4+白雾），避免沿用旧页图
     //注意：triggerPicGen 可能从协程(非主线程)触发，动画 start/cancel 必须切主线程
-    fun showLoading() {
+    fun showLoading(currentKey: String? = null) {
         post {
+            ivPic.visibility = GONE
             ivLoading.visibility = VISIBLE
             if (!loadingAnimator.isRunning) loadingAnimator.start()
             tvStatus.visibility = GONE
+            //首图未就绪：用缓存相关图拼 4x4 背景 + 半透明白雾，代替黑色加载底
+            startMosaic(currentKey)
         }
     }
 
@@ -212,6 +222,59 @@ class PicWindowView @JvmOverloads constructor(
     }
 
     fun hasImage(): Boolean = ivPic.visibility == VISIBLE
+
+    // ---- 缓存拼图背景：首图未就绪时显示，每 30s 轮换更替 ----
+    private val mosaicHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    @Volatile
+    private var mosaicKey: String? = null
+    private var mosaicOffset = 0
+
+    private val mosaicRunnable = object : Runnable {
+        override fun run() {
+            mosaicOffset++
+            refreshMosaic()
+            mosaicHandler.postDelayed(this, 30_000L)
+        }
+    }
+
+    private fun startMosaic(key: String?) {
+        //若已在轮换且 key 未变，保持；否则重启
+        if (mosaicKey == key && mosaicHandler.hasCallbacks(mosaicRunnable)) return
+        mosaicKey = key
+        mosaicOffset = 0
+        mosaicHandler.removeCallbacks(mosaicRunnable)
+        if (key != null) {
+            refreshMosaic()
+            mosaicHandler.postDelayed(mosaicRunnable, 30_000L)
+        }
+    }
+
+    private fun refreshMosaic() {
+        val key = mosaicKey ?: return
+        //生成拼图较耗时，放 IO 再回主线程
+        io.legado.app.help.picgen.PicGenManager.mosaicScope().launch {
+            val bmp = io.legado.app.help.picgen.PicGenManager.buildMosaic(key, mosaicOffset)
+            post {
+                if (bmp != null) {
+                    ivMosaic.setImageBitmap(bmp)
+                    ivMosaic.visibility = VISIBLE
+                    vFog.visibility = VISIBLE
+                } else {
+                    ivMosaic.visibility = GONE
+                    vFog.visibility = GONE
+                }
+            }
+        }
+    }
+
+    private fun stopMosaic() {
+        mosaicHandler.removeCallbacks(mosaicRunnable)
+        mosaicKey = null
+        post {
+            ivMosaic.visibility = GONE
+            vFog.visibility = GONE
+        }
+    }
 
     private fun stopLoading() {
         post {
